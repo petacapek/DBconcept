@@ -669,7 +669,7 @@ pf(q=(M1ss - M2ss)*(nt - M2p)/M2ss/(M2p - M1p),
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
 ############################################################################################################################
-#################################################Blagodatskaya et al, 2004########################################################
+#################################################Blagodatskaya et al, 2014########################################################
 ############################################################################################################################
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
 #DATA
@@ -843,7 +843,7 @@ ggplot(subset(Blag_fit$Yhat, variable=="CO2" | variable=="CFC14"), aes(time, obs
 #Log Likelihood ratio test
 -2*(Blag_monodfit$Gfit$ll-Blag_fit$Gfit$ll)
 
-round(pchisq(-2*(Blag_monodfit$Gfit$ll-Blag_fit$Gfit$ll), df=(length(Blag_optpar)-length(Blag_monodopt)),
+round(pchisq(-2*(Blag_monodfit$Gfit$ll-Blag_fit$Gfit$ll), df=(length(blag_optpar)-length(blag_monodopt)),
              lower.tail = F), 3)
 
 #F test - based on residual sum of squares, number of parameters and number of measurements
@@ -851,16 +851,220 @@ round(pchisq(-2*(Blag_monodfit$Gfit$ll-Blag_fit$Gfit$ll), df=(length(Blag_optpar
 ###residual sum of squares
 M1ss = sum((Blag_monodfit$Yhat$obs-Blag_monodfit$Yhat$value)^2, na.rm = T)
 ###number of parameters 
-M1p = length(Blag_monodopt)
+M1p = length(blag_monodopt)
 
 ##Sub-microbial model
 ###residual sum of squares
 M2ss = sum((Blag_fit$Yhat$obs-Blag_fit$Yhat$value)^2, na.rm = T)
 ###number of parameters 
-M2p = length(Blag_optpar)
+M2p = length(blag_optpar)
 
 ###total number of measurements
 nt = nrow(Blag_fit$Yhat[!is.na(Blag_fit$Yhat), ])
+
+####F value =  (M1ss - M2ss)*(nt - M2p)/M2ss/(M2p - M1p)
+(M1ss - M2ss)*(nt - M2p)/M2ss/(M2p - M1p)
+
+####associated p value
+pf(q=(M1ss - M2ss)*(nt - M2p)/M2ss/(M2p - M1p), 
+   df1=(M2p - M1p), 
+   df2=(nt - M2p), 
+   lower.tail=F)
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+############################################################################################################################
+#################################################Blagodatskaya et al, 2011########################################################
+############################################################################################################################
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+#DATA
+bla<-read.csv("Data/Blagodatskaya2011.csv", sep=',')
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Sub-microbial model~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+#Model definition
+SUBmodel<-function(time, state, pars){
+  with(as.list(c(state, pars)),{
+    #uptake
+    uptake=v*G*Bs/(k+G)
+    #Transfer function
+    transfer=f*Br
+    #death rate
+    death=m*Bs
+    #Respiration rate
+    r=transfer*(1-Y)
+    #Chloroform labile C and DNA
+    CFC14=(fr*Br+fs*Bs)-bla$Cmicinit[1]
+    
+    #States
+    dG<- - uptake
+    dBr<- uptake - transfer
+    dBs<- transfer*Y - death
+    dCO2<- transfer*(1-Y)
+    
+    return(list(c(dG, dBr, dBs, dCO2), CFC14=CFC14, r=r))
+  })
+}
+
+#Goodness of fit
+good_sub<-function(x){
+  p<-x
+  names(p)<-c("v", "k", "f", "m", "Y", "fr", "fs")
+  #Initial Br and Bs
+  Bs_i<-bla$Cmicinit[1]/p[["fs"]]
+  #Br_i<-(mar$Cmicinit[1]-p[["fs"]]*Bs_i)/p[["fr"]]
+  #Simulations
+  yhat_all<-as.data.frame(ode(y=c(G=bla$Sinit[1], Br=0, Bs=Bs_i, CO2=0),
+                              func = SUBmodel, parms=p,
+                              times = as.numeric(bla$Time)))
+  #Selecting measured variables
+  yhat<-yhat_all[, c("time", "CO2", "CFC14")]
+  #Long format
+  Yhat<-melt(yhat, id.vars=c("time"))
+  #Observations
+  Yhat$obs<-c(as.numeric(bla$CO214), as.numeric(bla$Cmic14))
+  Gfit<-Yhat %>% group_by(variable) %>% summarise(SSres=sum(((obs-value)^2), na.rm = T),
+                                                  SStot=sum(((obs-mean(obs, na.rm = T))^2), na.rm = T),
+                                                  ll=-sum(((obs-value)^2), na.rm = T)/2/(sd(obs, na.rm = T)^2))
+  Gfit$R2<-with(Gfit, 1-SSres/SStot)
+  Gfit$N<-length(p)
+  Gfit$AIC<-with(Gfit, 2*N-2*ll)
+  
+  #Fine temporal scale fo r graphs
+  yhat_all_fine<-as.data.frame(ode(y=c(G=bla$Sinit[1], Br=0, Bs=Bs_i, CO2=0),
+                                   func = SUBmodel, parms=p,
+                                   times = seq(0, 55, by=1)))
+  Yhat_all_fine<-melt(yhat_all_fine, id.vars=c("time"))
+  
+  rsq_out<-list(Yhat=Yhat, Gfit=Gfit, Yhat_fine = Yhat_all_fine)
+  
+  return(rsq_out)
+}
+
+#Read parameters estimated in python
+blag11_optpar<-as.numeric(read.csv("parameters/blag11_optpars.csv", header = F))
+
+Blag11_fit<-good_sub(blag11_optpar)
+as.data.frame(Blag11_fit$Gfit)
+
+#Figure
+Blag11_fit$Yhat$variable2<-Blag11_fit$Yhat$variable
+levels(Blag11_fit$Yhat$variable2)<-c("CO[2]", "MBC")
+
+Blag11_fit$Yhat_fine$variable2<-Blag11_fit$Yhat_fine$variable
+levels(Blag11_fit$Yhat_fine$variable2)<-c("Glucose", "Br", "Bs", "CO[2]", "MBC", "Respiration")
+
+ggplot(subset(Blag11_fit$Yhat, variable=="CO2" | variable=="CFC14"), aes(time, obs))+
+  geom_point(cex=6, pch=21, fill="grey")+
+  geom_line(data=subset(Blag11_fit$Yhat_fine, variable=="CO2" | variable=="CFC14"), aes(time, value), lwd=1.2, color="grey30")+theme_min+
+  facet_wrap(~variable2, scales="free", labeller = label_parsed) + 
+  ylab(expression(paste("Carbon pool (", mu, "mol ", g(DW)^{-1}, ")"))) +
+  xlab("Time (days)")
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Monod model~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+#Model definition
+Monod<-function(time, state, pars){
+  with(as.list(c(state, pars)),{
+    #glucose uptake
+    uptake=v*G*B/(k + G)
+    #Decay rate
+    decay=m*B
+    #Respiration rate
+    r=(1-Y)*uptake + decay
+    #Chloroform labile C and DNA
+    CFC14=kec*B-bla$Cmicinit[1]
+    
+    #States
+    dB<- uptake*Y - decay
+    dG<- - uptake
+    dCO2<- uptake*(1-Y)
+    
+    return(list(c(dB, dG, dCO2), CFC14=CFC14, r=r))
+  })
+}
+
+#Goodness of fit
+monodgood<-function(x){
+  p<-x
+  names(p)<-c("v", "k", "m", "Y", "kec")
+  #Initial Br and Bs
+  B_i<-bla$Cmicinit[1]/p[["kec"]]
+  
+  #Simulations
+  yhat_all<-as.data.frame(ode(y=c(B=B_i, G=bla$Sinit[1], CO2=0),
+                              func = Monod, parms=p,
+                              times = as.numeric(bla$Time)))
+  #Selecting measured variables
+  yhat<-yhat_all[, c("time", "CO2", "CFC14")]
+  #Long format
+  Yhat<-melt(yhat, id.vars=c("time"))
+  #Observations
+  Yhat$obs<-c(as.numeric(bla$CO214), 
+              as.numeric(bla$Cmic14))
+  Gfit<-Yhat %>% group_by(variable) %>% summarise(SSres=sum(((obs-value)^2), na.rm = T),
+                                                  SStot=sum(((obs-mean(obs, na.rm = T))^2), na.rm = T),
+                                                  ll=-sum(((obs-value)^2), na.rm = T)/2/(sd(obs, na.rm = T)^2))
+  Gfit$R2<-with(Gfit, 1-SSres/SStot)
+  Gfit$N<-length(p)
+  Gfit$AIC<-with(Gfit, 2*N-2*ll)
+  
+  #Fine temporal scale for graphs
+  yhat_all_fine<-as.data.frame(ode(y=c(B=B_i, G=bla$Sinit[1], CO2=0),
+                                   func = Monod, parms=p,
+                                   times = seq(0, 55, by=1)))
+  Yhat_all_fine<-melt(yhat_all_fine, id.vars=c("time"))
+  
+  rsq_out<-list(Yhat=Yhat, Gfit=Gfit, Yhat_fine = Yhat_all_fine)
+  
+  return(rsq_out)
+}
+
+#Read parameters estimated in python
+blag11_monodopt<-as.numeric(read.csv("parameters/blag11_monodpars.csv", header = F))
+
+Blag11_monodfit<-monodgood(blag11_monodopt)
+as.data.frame(Blag11_monodfit$Gfit)
+
+#Figure
+Blag11_monodfit$Yhat_fine$variable2<-Blag11_monodfit$Yhat_fine$variable
+levels(Blag11_monodfit$Yhat_fine$variable2)<-c("B", "Glucose",  "CO[2]", "MBC", "Respiration")
+
+Blag11_fita<-subset(Blag11_fit$Yhat_fine, variable=="CO2" | variable=="CFC14")
+Blag11_fita$Model<-c("Sub-microbial")
+Blag11_fitb<-subset(Blag11_monodfit$Yhat_fine, variable=="CO2" | variable=="CFC14")
+Blag11_fitb$Model<-c("Monod")
+
+Blag11_fit_all<-rbind(Blag11_fita, Blag11_fitb)
+
+ggplot(subset(Blag11_fit$Yhat, variable=="CO2" | variable=="CFC14"), aes(time, obs))+
+  geom_point(cex=6, pch=21, fill="grey")+
+  geom_line(data=Blag11_fit_all, aes(time, value, color=Model), lwd=1.2)+theme_min+
+  facet_wrap(~variable2, scales="free", labeller = label_parsed) + 
+  ylab(expression(paste("Carbon pool (", mu, "mol ", g(DW)^{-1}, ")"))) +
+  xlab("Time (days)") + scale_color_manual(values = c("indianred", "grey30")) +
+  theme(legend.position = c(0.85, 0.8))
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Statistics~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+#Log Likelihood ratio test
+-2*(Blag11_monodfit$Gfit$ll-Blag11_fit$Gfit$ll)
+
+round(pchisq(-2*(Blag11_monodfit$Gfit$ll-Blag11_fit$Gfit$ll), df=(length(blag11_optpar)-length(blag11_monodopt)),
+             lower.tail = F), 3)
+
+#F test - based on residual sum of squares, number of parameters and number of measurements
+##Monod model
+###residual sum of squares
+M1ss = sum((Blag11_monodfit$Yhat$obs-Blag11_monodfit$Yhat$value)^2, na.rm = T)
+###number of parameters 
+M1p = length(blag11_monodopt)
+
+##Sub-microbial model
+###residual sum of squares
+M2ss = sum((Blag11_fit$Yhat$obs-Blag11_fit$Yhat$value)^2, na.rm = T)
+###number of parameters 
+M2p = length(blag11_optpar)
+
+###total number of measurements
+nt = nrow(Blag11_fit$Yhat[!is.na(Blag11_fit$Yhat), ])
 
 ####F value =  (M1ss - M2ss)*(nt - M2p)/M2ss/(M2p - M1p)
 (M1ss - M2ss)*(nt - M2p)/M2ss/(M2p - M1p)
