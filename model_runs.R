@@ -1074,3 +1074,252 @@ pf(q=(M1ss - M2ss)*(nt - M2p)/M2ss/(M2p - M1p),
    df1=(M2p - M1p), 
    df2=(nt - M2p), 
    lower.tail=F)
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+############################################################################################################################
+#################################################Tsai et al, 1997###########################################################
+############################################################################################################################
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+#DATA
+tsai<-read.csv("Data/Tsai1997.csv", sep=',')
+#High glucose treatment
+tsai1<-subset(tsai, Treatment=="HighG")
+tsai2<-subset(tsai, Treatment=="LowG")
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Sub-microbial model~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+#Model definition
+SUBmodel<-function(time, state, pars){
+  with(as.list(c(state, pars)),{
+    #uptake
+    uptake=v*G*Bs/(k+G)
+    #Transfer function
+    transfer=f*Br
+    #death rate
+    death=m*Bs
+    #Respiration rate
+    r=transfer*(1-Y)
+    #Chloroform labile C and DNA
+    CFC=fr*Br+fs*Bs
+    ATP=ar*Br+as*Bs
+    
+    #States
+    dG<- - uptake
+    dBr<- uptake - transfer
+    dBs<- transfer*Y - death
+    dCO2<- transfer*(1-Y)
+    
+    return(list(c(dG, dBr, dBs, dCO2), CFC=CFC, ATP=ATP, r=r))
+  })
+}
+
+#Goodness of fit
+good_sub<-function(x){
+  p<-x
+  names(p)<-c("v", "k", "f", "m", "Y", "fr", "fs", "ar", "as")
+  #Initial Br and Bs
+  Bs_i<-tsai1$Cmicinit[1]/p[["fs"]]
+  
+  #Simulations
+  yhat_all1<-as.data.frame(ode(y=c(G=tsai1$Sinit[1], Br=0, Bs=Bs_i, CO2=0),
+                              func = SUBmodel, parms=p,
+                              times = as.numeric(tsai1$Time)))
+  yhat_all2<-as.data.frame(ode(y=c(G=tsai2$Sinit[1], Br=0, Bs=Bs_i, CO2=0),
+                               func = SUBmodel, parms=p,
+                               times = as.numeric(tsai1$Time)))
+  #Selecting measured variables
+  yhat1<-yhat_all1[, c("time", "CO2", "CFC", "ATP")]
+  #Long format
+  Yhat1<-melt(yhat1, id.vars=c("time"))
+  Yhat1$Treatment<-c("HighG")
+  #Selecting measured variables
+  yhat2<-yhat_all2[, c("time", "CO2", "CFC", "ATP")]
+  #Long format
+  Yhat2<-melt(yhat2, id.vars=c("time"))
+  Yhat2$Treatment<-c("LowG")
+  Yhat<-rbind(Yhat1, Yhat2)
+  #Observations
+  Yhat$obs<-c(as.numeric(tsai1$CO2cumul), as.numeric(tsai1$Cmic), as.numeric(tsai1$ATP),
+              as.numeric(tsai2$CO2cumul), as.numeric(tsai2$Cmic), as.numeric(tsai2$ATP))
+  Gfit<-Yhat %>% group_by(variable) %>% summarise(SSres=sum(((obs-value)^2), na.rm = T),
+                                                  SStot=sum(((obs-mean(obs, na.rm = T))^2), na.rm = T),
+                                                  ll=-sum(((obs-value)^2), na.rm = T)/2/(sd(obs, na.rm = T)^2))
+  Gfit$R2<-with(Gfit, 1-SSres/SStot)
+  Gfit$N<-length(p)
+  Gfit$AIC<-with(Gfit, 2*N-2*ll)
+  
+  #Fine temporal scale fo r graphs
+  yhat_all_fine1<-as.data.frame(ode(y=c(G=tsai1$Sinit[1], Br=0, Bs=Bs_i, CO2=0),
+                                   func = SUBmodel, parms=p,
+                                   times = seq(0, 9, by=0.1)))
+  yhat_all_fine2<-as.data.frame(ode(y=c(G=tsai2$Sinit[1], Br=0, Bs=Bs_i, CO2=0),
+                                    func = SUBmodel, parms=p,
+                                    times = seq(0, 9, by=0.1)))
+  Yhat_all_fine1<-melt(yhat_all_fine1, id.vars=c("time"))
+  Yhat_all_fine1$Treatment<-c("HighG")
+  Yhat_all_fine2<-melt(yhat_all_fine2, id.vars=c("time"))
+  Yhat_all_fine2$Treatment<-c("LowG")
+  
+  Yhat_all_fine<-rbind(Yhat_all_fine1, Yhat_all_fine2)
+  
+  rsq_out<-list(Yhat=Yhat, Gfit=Gfit, Yhat_fine = Yhat_all_fine)
+  
+  return(rsq_out)
+}
+
+#Read parameters estimated in python
+tsai_optpar<-as.numeric(read.csv("parameters/tsai_optpars.csv", header = F))
+
+Tsai_fit<-good_sub(tsai_optpar)
+as.data.frame(Tsai_fit$Gfit)
+
+#Figure
+Tsai_fit$Yhat$variable2<-Tsai_fit$Yhat$variable
+levels(Tsai_fit$Yhat$variable2)<-c("CO[2]", "MBC", "ATP")
+
+Tsai_fit$Yhat_fine$variable2<-Tsai_fit$Yhat_fine$variable
+levels(Tsai_fit$Yhat_fine$variable2)<-c("Glucose", "Br", "Bs", "CO[2]", "MBC", "ATP", "Respiration")
+
+ggplot(subset(Tsai_fit$Yhat, variable=="CO2" | variable=="CFC" | variable=="ATP"), aes(time, obs))+
+  geom_point(cex=6, aes(pch=Treatment), fill="grey")+
+  scale_shape_manual(values = c(21, 22)) + 
+  geom_line(data=subset(Tsai_fit$Yhat_fine, variable=="CO2" | variable=="CFC" | variable=="ATP"), 
+            aes(time, value, linetype=Treatment), lwd=1.2, color="grey30")+theme_min+
+  facet_wrap(~variable2, scales="free", labeller = label_parsed) + 
+  ylab(expression(paste("Carbon pool (", mu, "mol ", g(DW)^{-1}, ")"))) +
+  xlab("Time (days)")
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Monod model~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+#Model definition
+Monod<-function(time, state, pars){
+  with(as.list(c(state, pars)),{
+    #glucose uptake
+    uptake=v*G*B/(k + G)
+    #Decay rate
+    decay=m*B
+    #Respiration rate
+    r=(1-Y)*uptake + decay
+    #Chloroform labile C and DNA
+    CFC=kec*B
+    ATP=ka*B
+    
+    #States
+    dB<- uptake*Y - decay
+    dG<- - uptake
+    dCO2<- uptake*(1-Y)
+    
+    return(list(c(dB, dG, dCO2), CFC=CFC, ATP=ATP, r=r))
+  })
+}
+
+#Goodness of fit
+monodgood<-function(x){
+  p<-x
+  names(p)<-c("v", "k", "m", "Y", "kec", "ka")
+  #Initial Br and Bs
+  B_i<-tsai$Cmicinit[1]/p[["kec"]]
+  
+  #Simulations
+  yhat_all1<-as.data.frame(ode(y=c(B=B_i, G=tsai1$Sinit[1], CO2=0),
+                              func = Monod, parms=p,
+                              times = as.numeric(tsai1$Time)))
+  yhat_all2<-as.data.frame(ode(y=c(B=B_i, G=tsai2$Sinit[1], CO2=0),
+                               func = Monod, parms=p,
+                               times = as.numeric(tsai1$Time)))
+  #Selecting measured variables
+  yhat1<-yhat_all1[, c("time", "CO2", "CFC", "ATP")]
+  #Long format
+  Yhat1<-melt(yhat1, id.vars=c("time"))
+  Yhat1$Treatment<-c("HighG")
+  #Selecting measured variables
+  yhat2<-yhat_all2[, c("time", "CO2", "CFC", "ATP")]
+  #Long format
+  Yhat2<-melt(yhat2, id.vars=c("time"))
+  Yhat2$Treatment<-c("LowG")
+  Yhat<-rbind(Yhat1, Yhat2)
+  #Observations
+  Yhat$obs<-c(as.numeric(tsai1$CO2cumul), as.numeric(tsai1$Cmic), as.numeric(tsai1$ATP),
+              as.numeric(tsai2$CO2cumul), as.numeric(tsai2$Cmic), as.numeric(tsai2$ATP))
+  Gfit<-Yhat %>% group_by(variable) %>% summarise(SSres=sum(((obs-value)^2), na.rm = T),
+                                                  SStot=sum(((obs-mean(obs, na.rm = T))^2), na.rm = T),
+                                                  ll=-sum(((obs-value)^2), na.rm = T)/2/(sd(obs, na.rm = T)^2))
+  Gfit$R2<-with(Gfit, 1-SSres/SStot)
+  Gfit$N<-length(p)
+  Gfit$AIC<-with(Gfit, 2*N-2*ll)
+  
+  #Fine temporal scale for graphs
+  yhat_all_fine1<-as.data.frame(ode(y=c(B=B_i, G=tsai1$Sinit[1], CO2=0),
+                                   func = Monod, parms=p,
+                                   times = seq(0, 9, by=0.1)))
+  yhat_all_fine2<-as.data.frame(ode(y=c(B=B_i, G=tsai2$Sinit[1], CO2=0),
+                                    func = Monod, parms=p,
+                                    times = seq(0, 9, by=0.1)))
+  Yhat_all_fine1<-melt(yhat_all_fine1, id.vars=c("time"))
+  Yhat_all_fine1$Treatment<-c("HighG")
+  Yhat_all_fine2<-melt(yhat_all_fine2, id.vars=c("time"))
+  Yhat_all_fine2$Treatment<-c("LowG")
+  
+  Yhat_all_fine<-rbind(Yhat_all_fine1, Yhat_all_fine2)
+  
+  rsq_out<-list(Yhat=Yhat, Gfit=Gfit, Yhat_fine = Yhat_all_fine)
+  
+  return(rsq_out)
+}
+
+#Read parameters estimated in python
+tsai_monodopt<-as.numeric(read.csv("parameters/tsai_monodpars.csv", header = F))
+
+Tsai_monodfit<-monodgood(tsai_monodopt)
+as.data.frame(Tsai_monodfit$Gfit)
+
+#Figure
+Tsai_monodfit$Yhat_fine$variable2<-Tsai_monodfit$Yhat_fine$variable
+levels(Tsai_monodfit$Yhat_fine$variable2)<-c("B", "Glucose",  "CO[2]", "MBC", "ATP","Respiration")
+
+Tsai_fita<-subset(Tsai_fit$Yhat_fine, variable=="CO2" | variable=="CFC" | variable=="ATP")
+Tsai_fita$Model<-c("Sub-microbial")
+Tsai_fitb<-subset(Tsai_monodfit$Yhat_fine, variable=="CO2" | variable=="CFC" | variable=="ATP")
+Tsai_fitb$Model<-c("Monod")
+
+Tsai_fit_all<-rbind(Tsai_fita, Tsai_fitb)
+
+ggplot(subset(Tsai_fit$Yhat, variable=="CO2" | variable=="CFC" | variable=="ATP"), aes(time, obs))+
+  geom_point(cex=6, aes(pch=Treatment), fill="grey")+
+  scale_shape_manual(values=c(21, 22))+
+  geom_line(data=Tsai_fit_all, aes(time, value, color=Model, linetype=Treatment), lwd=1.2)+theme_min+
+  facet_wrap(~variable2, scales="free", labeller = label_parsed) + 
+  ylab(expression(paste("Carbon pool (", mu, "mol ", g(DW)^{-1}, ")"))) +
+  xlab("Time (days)") + scale_color_manual(values = c("indianred", "grey30")) +
+  theme(legend.position = c(0.85, 0.8))
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Statistics~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+#Log Likelihood ratio test
+-2*(Tsai_monodfit$Gfit$ll-Tsai_fit$Gfit$ll)
+
+round(pchisq(-2*(Tsai_monodfit$Gfit$ll-Tsai_fit$Gfit$ll), df=(length(tsai_optpar)-length(tsai_monodopt)),
+             lower.tail = F), 3)
+
+#F test - based on residual sum of squares, number of parameters and number of measurements
+##Monod model
+###residual sum of squares
+M1ss = sum((Tsai_monodfit$Yhat$obs-Tsai_monodfit$Yhat$value)^2, na.rm = T)
+###number of parameters 
+M1p = length(tsai_monodopt)
+
+##Sub-microbial model
+###residual sum of squares
+M2ss = sum((Tsai_fit$Yhat$obs-Tsai_fit$Yhat$value)^2, na.rm = T)
+###number of parameters 
+M2p = length(tsai_optpar)
+
+###total number of measurements
+nt = nrow(Tsai_fit$Yhat[!is.na(Tsai_fit$Yhat), ])
+
+####F value =  (M1ss - M2ss)*(nt - M2p)/M2ss/(M2p - M1p)
+(M1ss - M2ss)*(nt - M2p)/M2ss/(M2p - M1p)
+
+####associated p value
+pf(q=(M1ss - M2ss)*(nt - M2p)/M2ss/(M2p - M1p), 
+   df1=(M2p - M1p), 
+   df2=(nt - M2p), 
+   lower.tail=F)
+  
