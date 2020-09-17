@@ -1653,3 +1653,352 @@ pf(q=(M1ss - M2ss)*(nt - M2p)/M2ss/(M2p - M1p),
    df1=(M2p - M1p), 
    df2=(nt - M2p), 
    lower.tail=F)
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+############################################################################################################################
+###################################################Wu et al, 2011###########################################################
+############################################################################################################################
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+#DATA
+wu<-read.csv("Data/Wu2011.csv", sep=',')
+#Glucose
+wuG<-subset(wu, Substrate=='Glucose')
+wuG1<-subset(wuG, Soil=="Paddy")
+wuG2<-subset(wuG, Soil=="Upland")
+#Ryegrass
+wuR<-subset(wu, Substrate=='Rice')
+wuR1<-subset(wuR, Soil=="Paddy")
+wuR2<-subset(wuR, Soil=="Upland")
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Sub-microbial model~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+#Model definition
+SUBmodel<-function(time, state, pars){
+  with(as.list(c(state, pars)),{
+    #uptake
+    uptake=v*G*Bs/(k+G)
+    #Transfer function
+    transfer=f*Br
+    #death rate
+    death=m*Bs
+    #Respiration rate
+    r=transfer*(1-Y)
+    #Chloroform labile C and DNA
+    #CFC14=(fr*Br+fs*Bs)-wu$Cmicinit[1]
+    
+    #States
+    dG<- - uptake
+    dBr<- uptake - transfer
+    dBs<- transfer*Y - death
+    dCO2<- transfer*(1-Y)
+    
+    return(list(c(dG, dBr, dBs, dCO2)))
+  })
+}
+
+#Goodness of fit
+good_sub<-function(xG1, xG2, xR1, xR2){
+  
+  names(xG1)<-c("v", "k", "f", "m", "Y", "fr", "fs")
+  names(xG2)<-c("v", "k", "f", "m", "Y", "fr", "fs")
+  names(xR1)<-c("v", "k", "f", "m", "Y", "fr", "fs")
+  names(xR2)<-c("v", "k", "f", "m", "Y", "fr", "fs")
+  #Initial Br and Bs
+  Bs_iG1<-wuG1$Cmicinit[1]/xG1[["fs"]]
+  Bs_iG2<-wuG2$Cmicinit[1]/xG2[["fs"]]
+  Bs_iR1<-wuR1$Cmicinit[1]/xR1[["fs"]]
+  Bs_iR2<-wuR2$Cmicinit[1]/xR2[["fs"]]
+  
+  #Simulations
+  yhat_allG1<-as.data.frame(ode(y=c(G=wuG1$Sinit[1], Br=0, Bs=Bs_iG1, CO2=0),
+                                func = SUBmodel, parms=xG1, 
+                                times = as.numeric(wuG1$Time)))
+  yhat_allG1$CFC14<-with(yhat_allG1, (xG1[["fr"]]*Br+xG1[["fs"]]*Bs)-wuG1$Cmicinit[1])
+  yhat_allG2<-as.data.frame(ode(y=c(G=wuG2$Sinit[1], Br=0, Bs=Bs_iG2, CO2=0),
+                                func = SUBmodel, parms=xG2,
+                                times = as.numeric(wuG2$Time)))
+  yhat_allG2$CFC14<-with(yhat_allG2, (xG2[["fr"]]*Br+xG2[["fs"]]*Bs)-wuG2$Cmicinit[1])
+  yhat_allR1<-as.data.frame(ode(y=c(G=wuR1$Sinit[1], Br=0, Bs=Bs_iR1, CO2=0),
+                                func = SUBmodel, parms=xR1,
+                                times = as.numeric(wuR1$Time)))
+  yhat_allR1$CFC14<-with(yhat_allR1, (xR1[["fr"]]*Br+xR1[["fs"]]*Bs)-wuR1$Cmicinit[1])
+  yhat_allR2<-as.data.frame(ode(y=c(G=wuR2$Sinit[1], Br=0, Bs=Bs_iR2, CO2=0),
+                                func = SUBmodel, parms=xR2,
+                                times = as.numeric(wuR2$Time)))
+  yhat_allR2$CFC14<-with(yhat_allR2, (xR2[["fr"]]*Br+xR2[["fs"]]*Bs)-wuR2$Cmicinit[1])
+  #Selecting measured variables
+  yhatG1<-yhat_allG1[, c("time", "CO2", "CFC14")]
+  yhatG2<-yhat_allG2[, c("time", "CO2", "CFC14")]
+  yhatR1<-yhat_allR1[, c("time", "CO2", "CFC14")]
+  yhatR2<-yhat_allR2[, c("time", "CO2", "CFC14")]
+  #Long format
+  YhatG1<-melt(yhatG1, id.vars=c("time"))
+  YhatG1$Substrate<-c("Glucose")
+  YhatG1$Soil<-c("Paddy")
+  YhatG2<-melt(yhatG2, id.vars=c("time"))
+  YhatG2$Substrate<-c("Glucose")
+  YhatG2$Soil<-c("Upland")
+  YhatR1<-melt(yhatR1, id.vars=c("time"))
+  YhatR1$Substrate<-c("Rice")
+  YhatR1$Soil<-c("Paddy")
+  YhatR2<-melt(yhatR2, id.vars=c("time"))
+  YhatR2$Substrate<-c("Rice")
+  YhatR2$Soil<-c("Upland")
+  Yhat<-rbind(YhatG1, YhatG2, YhatR1, YhatR2)
+  #Observations
+  Yhat$obs<-c(as.numeric(wuG1$CO2cumul), as.numeric(wuG1$Cmic14),
+              as.numeric(wuG2$CO2cumul), as.numeric(wuG2$Cmic14),
+              as.numeric(wuR1$CO2cumul), as.numeric(wuR1$Cmic14),
+              as.numeric(wuR2$CO2cumul), as.numeric(wuR2$Cmic14))
+  Gfit<-Yhat %>% group_by(variable, Substrate, Soil) %>% summarise(SSres=sum(((obs-value)^2), na.rm = T),
+                                                                        SStot=sum(((obs-mean(obs, na.rm = T))^2), na.rm = T),
+                                                                        ll=-sum(((obs-value)^2), na.rm = T)/2/(sd(obs, na.rm = T)^2))
+  Gfit$R2<-with(Gfit, 1-SSres/SStot)
+  Gfit$N<-length(xG1)
+  Gfit$AIC<-with(Gfit, 2*N-2*ll)
+  
+  #Fine temporal scale fo r graphs
+  yhat_all_fineG1<-as.data.frame(ode(y=c(G=wuG1$Sinit[1], Br=0, Bs=Bs_iG1, CO2=0),
+                                     func = SUBmodel, parms=xG1,
+                                     times = seq(0, 100)))
+  yhat_all_fineG1$CFC14<-with(yhat_all_fineG1, (xG1[["fr"]]*Br+xG1[["fs"]]*Bs)-wuG1$Cmicinit[1])
+  yhat_all_fineG2<-as.data.frame(ode(y=c(G=wuG2$Sinit[1], Br=0, Bs=Bs_iG2, CO2=0),
+                                     func = SUBmodel, parms=xG2,
+                                     times = seq(0, 100)))
+  yhat_all_fineG2$CFC14<-with(yhat_all_fineG2, (xG2[["fr"]]*Br+xG2[["fs"]]*Bs)-wuG2$Cmicinit[1])
+  yhat_all_fineR1<-as.data.frame(ode(y=c(G=wuR1$Sinit[1], Br=0, Bs=Bs_iR1, CO2=0),
+                                     func = SUBmodel, parms=xR1,
+                                     times = seq(0, 100)))
+  yhat_all_fineR1$CFC14<-with(yhat_all_fineR1, (xR1[["fr"]]*Br+xR1[["fs"]]*Bs)-wuR1$Cmicinit[1])
+  yhat_all_fineR2<-as.data.frame(ode(y=c(G=wuR2$Sinit[1], Br=0, Bs=Bs_iR2, CO2=0),
+                                     func = SUBmodel, parms=xR2,
+                                     times = seq(0, 100)))
+  yhat_all_fineR2$CFC14<-with(yhat_all_fineR2, (xR2[["fr"]]*Br+xR2[["fs"]]*Bs)-wuR2$Cmicinit[1])
+  
+  Yhat_all_fineG1<-melt(yhat_all_fineG1, id.vars=c("time"))
+  Yhat_all_fineG1$Substrate<-c("Glucose")
+  Yhat_all_fineG1$Soil<-c("Paddy")
+  Yhat_all_fineG2<-melt(yhat_all_fineG2, id.vars=c("time"))
+  Yhat_all_fineG2$Substrate<-c("Glucose")
+  Yhat_all_fineG2$Soil<-c("Upland")
+  Yhat_all_fineR1<-melt(yhat_all_fineR1, id.vars=c("time"))
+  Yhat_all_fineR1$Substrate<-c("Rice")
+  Yhat_all_fineR1$Soil<-c("Paddy")
+  Yhat_all_fineR2<-melt(yhat_all_fineR2, id.vars=c("time"))
+  Yhat_all_fineR2$Substrate<-c("Rice")
+  Yhat_all_fineR2$Soil<-c("Upland")
+  
+  Yhat_all_fine<-rbind(Yhat_all_fineG1, Yhat_all_fineG2,
+                       Yhat_all_fineR1, Yhat_all_fineR2)
+  
+  rsq_out<-list(Yhat=Yhat, Gfit=Gfit, Yhat_fine = Yhat_all_fine)
+  
+  return(rsq_out)
+}
+
+#Read parameters estimated in python
+wu11_optparG1<-as.numeric(read.csv("parameters/wu11_optparsG1.csv", header = F))
+wu11_optparG2<-as.numeric(read.csv("parameters/wu11_optparsG2.csv", header = F))
+wu11_optparR1<-as.numeric(read.csv("parameters/wu11_optparsR1.csv", header = F))
+wu11_optparR2<-as.numeric(read.csv("parameters/wu11_optparsR2.csv", header = F))
+
+Wu11_fit<-good_sub(wu11_optparG1, wu11_optparG2, wu11_optparR1, wu11_optparR2)
+as.data.frame(Wu11_fit$Gfit)
+
+#Figure
+Wu11_fit$Yhat$variable2<-Wu11_fit$Yhat$variable
+levels(Wu11_fit$Yhat$variable2)<-c("CO[2]", "MBC")
+
+Wu11_fit$Yhat_fine$variable2<-Wu11_fit$Yhat_fine$variable
+levels(Wu11_fit$Yhat_fine$variable2)<-c("Glucose", "Br", "Bs", "CO[2]", "MBC")
+
+ggplot(subset(Wu11_fit$Yhat, variable=="CO2" | variable=="CFC14"), aes(time, obs))+
+  geom_point(cex=6, aes(pch=Soil), fill="grey")+
+  scale_shape_manual(values = c(21, 22)) + 
+  geom_line(data=subset(Wu11_fit$Yhat_fine, variable=="CO2" | variable=="CFC14"), 
+            aes(time, value, linetype=Soil), lwd=1.2, color="grey30")+theme_min+
+  facet_wrap(Substrate~variable2, scales="free", labeller = label_parsed) + 
+  ylab(expression(paste("Carbon pool (", mu, "mol ", g(DW)^{-1}, ")"))) +
+  xlab("Time (days)")
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Monod model~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+#Model definition
+Monod<-function(time, state, pars){
+  with(as.list(c(state, pars)),{
+    #glucose uptake
+    uptake=v*G*B/(k + G)
+    #Decay rate
+    decay=m*B
+    #Respiration rate
+    r=(1-Y)*uptake + decay
+    #Chloroform labile C and DNA
+    #CFC14=(kec*B)-wu$Cmicinit[1]
+    
+    #States
+    dB<- uptake*Y - decay
+    dG<- - uptake
+    dCO2<- uptake*(1-Y)
+    
+    return(list(c(dB, dG, dCO2)))
+  })
+}
+
+#Goodness of fit
+monodgood<-function(xG1, xG2, xR1, xR2){
+  names(xG1)<-c("v", "k", "m", "Y", "kec")
+  names(xG2)<-c("v", "k", "m", "Y", "kec")
+  names(xR1)<-c("v", "k", "m", "Y", "kec")
+  names(xR2)<-c("v", "k", "m", "Y", "kec")
+  
+  #Initial Br and Bs
+  B_iG1<-wuG1$Cmicinit[1]/xG1[["kec"]]
+  B_iG2<-wuG2$Cmicinit[1]/xG2[["kec"]]
+  B_iR1<-wuR1$Cmicinit[1]/xR1[["kec"]]
+  B_iR2<-wuR2$Cmicinit[1]/xR2[["kec"]]
+  
+  #Simulations
+  yhat_allG1<-as.data.frame(ode(y=c(B=B_iG1, G=wuG1$Sinit[1], CO2=0),
+                                func = Monod, parms=xG1,
+                                times = as.numeric(wuG1$Time)))
+  yhat_allG1$CFC14<-with(yhat_allG1, (xG1[["kec"]]*B)-wuG1$Cmicinit[1])
+  yhat_allG2<-as.data.frame(ode(y=c(B=B_iG2, G=wuG2$Sinit[1], CO2=0),
+                                func = Monod, parms=xG2,
+                                times = as.numeric(wuG2$Time)))
+  yhat_allG2$CFC14<-with(yhat_allG2, (xG2[["kec"]]*B)-wuG2$Cmicinit[1])
+  yhat_allR1<-as.data.frame(ode(y=c(B=B_iR1, G=wuR1$Sinit[1], CO2=0),
+                                func = Monod, parms=xR1,
+                                times = as.numeric(wuR1$Time)))
+  yhat_allR1$CFC14<-with(yhat_allR1, (xR1[["kec"]]*B)-wuR1$Cmicinit[1])
+  yhat_allR2<-as.data.frame(ode(y=c(B=B_iR2, G=wuR2$Sinit[1], CO2=0),
+                                func = Monod, parms=xR2,
+                                times = as.numeric(wuR2$Time)))
+  yhat_allR2$CFC14<-with(yhat_allR2, (xR2[["kec"]]*B)-wuR2$Cmicinit[1])
+  #Selecting measured variables
+  yhatG1<-yhat_allG1[, c("time", "CO2", "CFC14")]
+  yhatG2<-yhat_allG2[, c("time", "CO2", "CFC14")]
+  yhatR1<-yhat_allR1[, c("time", "CO2", "CFC14")]
+  yhatR2<-yhat_allR2[, c("time", "CO2", "CFC14")]
+  #Long format
+  YhatG1<-melt(yhatG1, id.vars=c("time"))
+  YhatG1$Substrate<-c("Glucose")
+  YhatG1$Soil<-c("Paddy")
+  YhatG2<-melt(yhatG2, id.vars=c("time"))
+  YhatG2$Substrate<-c("Glucose")
+  YhatG2$Soil<-c("Upland")
+  YhatR1<-melt(yhatR1, id.vars=c("time"))
+  YhatR1$Substrate<-c("Rice")
+  YhatR1$Soil<-c("Paddy")
+  YhatR2<-melt(yhatR2, id.vars=c("time"))
+  YhatR2$Substrate<-c("Rice")
+  YhatR2$Soil<-c("Upland")
+  Yhat<-rbind(YhatG1, YhatG2, YhatR1, YhatR2)
+  #Observations
+  Yhat$obs<-c(as.numeric(wuG1$CO2cumul), as.numeric(wuG1$Cmic14),
+              as.numeric(wuG2$CO2cumul), as.numeric(wuG2$Cmic14),
+              as.numeric(wuR1$CO2cumul), as.numeric(wuR1$Cmic14),
+              as.numeric(wuR2$CO2cumul), as.numeric(wuR2$Cmic14))
+  Gfit<-Yhat %>% group_by(variable, Substrate, Soil) %>% summarise(SSres=sum(((obs-value)^2), na.rm = T),
+                                                                        SStot=sum(((obs-mean(obs, na.rm = T))^2), na.rm = T),
+                                                                        ll=-sum(((obs-value)^2), na.rm = T)/2/(sd(obs, na.rm = T)^2))
+  Gfit$R2<-with(Gfit, 1-SSres/SStot)
+  Gfit$N<-length(xG1)
+  Gfit$AIC<-with(Gfit, 2*N-2*ll)
+  
+  #Fine temporal scale for graphs
+  yhat_all_fineG1<-as.data.frame(ode(y=c(B=B_iG1, G=wuG1$Sinit[1], CO2=0),
+                                     func = Monod, parms=xG1,
+                                     times = seq(0, 100)))
+  yhat_all_fineG1$CFC14<-with(yhat_all_fineG1, (xG1[["kec"]]*B)-wuG1$Cmicinit[1])
+  yhat_all_fineG2<-as.data.frame(ode(y=c(B=B_iG2, G=wuG2$Sinit[1], CO2=0),
+                                     func = Monod, parms=xG2,
+                                     times = seq(0, 100)))
+  yhat_all_fineG2$CFC14<-with(yhat_all_fineG2, (xG2[["kec"]]*B)-wuG2$Cmicinit[1])
+  yhat_all_fineR1<-as.data.frame(ode(y=c(B=B_iR1, G=wuR1$Sinit[1], CO2=0),
+                                     func = Monod, parms=xR1,
+                                     times = seq(0, 100)))
+  yhat_all_fineR1$CFC14<-with(yhat_all_fineR1, (xR1[["kec"]]*B)-wuR1$Cmicinit[1])
+  yhat_all_fineR2<-as.data.frame(ode(y=c(B=B_iR2, G=wuR2$Sinit[1], CO2=0),
+                                     func = Monod, parms=xR2,
+                                     times = seq(0, 100)))
+  yhat_all_fineR2$CFC14<-with(yhat_all_fineR2, (xR2[["kec"]]*B)-wuR2$Cmicinit[1])
+  Yhat_all_fineG1<-melt(yhat_all_fineG1, id.vars=c("time"))
+  Yhat_all_fineG1$Substrate<-c("Glucose")
+  Yhat_all_fineG1$Soil<-c("Paddy")
+  Yhat_all_fineG2<-melt(yhat_all_fineG2, id.vars=c("time"))
+  Yhat_all_fineG2$Substrate<-c("Glucose")
+  Yhat_all_fineG2$Soil<-c("Upland")
+  Yhat_all_fineR1<-melt(yhat_all_fineR1, id.vars=c("time"))
+  Yhat_all_fineR1$Substrate<-c("Rice")
+  Yhat_all_fineR1$Soil<-c("Paddy")
+  Yhat_all_fineR2<-melt(yhat_all_fineR2, id.vars=c("time"))
+  Yhat_all_fineR2$Substrate<-c("Rice")
+  Yhat_all_fineR2$Soil<-c("Upland")
+  
+  Yhat_all_fine<-rbind(Yhat_all_fineG1, Yhat_all_fineG2,
+                       Yhat_all_fineR1, Yhat_all_fineR2)
+  
+  rsq_out<-list(Yhat=Yhat, Gfit=Gfit, Yhat_fine = Yhat_all_fine)
+  
+  return(rsq_out)
+}
+
+#Read parameters estimated in python
+wu11_monodoptG1<-as.numeric(read.csv("parameters/wu11_monodparsG1.csv", header = F))
+wu11_monodoptG2<-as.numeric(read.csv("parameters/wu11_monodparsG2.csv", header = F))
+wu11_monodoptR1<-as.numeric(read.csv("parameters/wu11_monodparsR1.csv", header = F))
+wu11_monodoptR2<-as.numeric(read.csv("parameters/wu11_monodparsR2.csv", header = F))
+
+Wu11_monodfit<-monodgood(wu11_monodoptG1, wu11_monodoptG2, wu11_monodoptR1, wu11_monodoptR2)
+as.data.frame(Wu11_monodfit$Gfit)
+
+#Figure
+Wu11_monodfit$Yhat_fine$variable2<-Wu11_monodfit$Yhat_fine$variable
+levels(Wu11_monodfit$Yhat_fine$variable2)<-c("B", "Glucose",  "CO[2]", "MBC")
+
+Wu11_fita<-subset(Wu11_fit$Yhat_fine, variable=="CO2" | variable=="CFC14")
+Wu11_fita$Model<-c("Sub-microbial")
+Wu11_fitb<-subset(Wu11_monodfit$Yhat_fine, variable=="CO2" | variable=="CFC14")
+Wu11_fitb$Model<-c("Monod")
+
+Wu11_fit_all<-rbind(Wu11_fita, Wu11_fitb)
+
+ggplot(subset(Wu11_fit$Yhat, variable=="CO2" | variable=="CFC14"), aes(time, obs))+
+  geom_point(cex=6, aes(pch=Soil), fill="grey")+
+  scale_shape_manual(values=c(21, 22))+
+  geom_line(data=Wu11_fit_all, aes(time, value, color=Model, linetype=Soil), lwd=1.2)+theme_min+
+  facet_wrap(Substrate~variable2, scales="free", labeller = label_parsed) + 
+  ylab(expression(paste("Carbon pool (", mu, "mol ", g(DW)^{-1}, ")"))) +
+  xlab("Time (days)") + scale_color_manual(values = c("indianred", "grey30")) +
+  theme(legend.position = c(0.85, 0.8))
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Statistics~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+#Log Likelihood ratio test
+-2*(Wu11_monodfit$Gfit$ll-Wu11_fit$Gfit$ll)
+
+round(pchisq(-2*(Wu11_monodfit$Gfit$ll-Wu11_fit$Gfit$ll), df=8,
+             lower.tail = F), 3)
+
+#F test - based on residual sum of squares, number of parameters and number of measurements
+##Monod model
+###residual sum of squares
+M1ss = sum((Wu11_monodfit$Yhat$obs-Wu11_monodfit$Yhat$value)^2, na.rm = T)
+###number of parameters 
+M1p = 20
+
+##Sub-microbial model
+###residual sum of squares
+M2ss = sum((Wu11_fit$Yhat$obs-Wu11_fit$Yhat$value)^2, na.rm = T)
+###number of parameters 
+M2p = 28
+
+###total number of measurements
+nt = nrow(Wu11_fit$Yhat[!is.na(Wu11_fit$Yhat), ])
+
+####F value =  (M1ss - M2ss)*(nt - M2p)/M2ss/(M2p - M1p)
+(M1ss - M2ss)*(nt - M2p)/M2ss/(M2p - M1p)
+
+####associated p value
+pf(q=(M1ss - M2ss)*(nt - M2p)/M2ss/(M2p - M1p), 
+   df1=(M2p - M1p), 
+   df2=(nt - M2p), 
+   lower.tail=F)
+  
