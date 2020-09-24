@@ -2002,3 +2002,258 @@ pf(q=(M1ss - M2ss)*(nt - M2p)/M2ss/(M2p - M1p),
    df2=(nt - M2p), 
    lower.tail=F)
   
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+############################################################################################################################
+###################################################Chander and Brookes, 1991################################################
+############################################################################################################################
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+#DATA
+ChB<-read.csv("Data/ChB1991.csv", sep=',')
+#Glucose
+ChBG<-subset(ChB, Substrate=='Glucose')
+#Maize
+ChBR<-subset(ChB, Substrate=='Maize')
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Sub-microbial model~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+#Model definition
+SUBmodel<-function(time, state, pars){
+  with(as.list(c(state, pars)),{
+    #uptake
+    uptake=v*G*Bs/(k+G)
+    #Transfer function
+    transfer=f*Br
+    #death rate
+    death=m*Bs
+    #Respiration rate
+    r=transfer*(1-Y)
+    #Chloroform labile C and DNA
+    #CFC14=(fr*Br+fs*Bs)-wu$Cmicinit[1]
+    
+    #States
+    dG<- - uptake
+    dBr<- uptake - transfer
+    dBs<- transfer*Y - death
+    dCO2<- transfer*(1-Y)
+    
+    return(list(c(dG, dBr, dBs, dCO2)))
+  })
+}
+
+#Goodness of fit
+good_sub<-function(xG, xR){
+  
+  names(xG)<-c("v", "k", "f", "m", "Y", "fr", "fs")
+  names(xR)<-c("v", "k", "f", "m", "Y", "fr", "fs")
+  #Initial Br and Bs
+  Bs_iG<-ChBG$Cmicinit[1]/xG[["fs"]]
+  Bs_iR<-ChBR$Cmicinit[1]/xR[["fs"]]
+  
+  #Simulations
+  yhat_allG<-as.data.frame(ode(y=c(G=ChBG$Sinit[1], Br=0, Bs=Bs_iG, CO2=0),
+                                func = SUBmodel, parms=xG, 
+                                times = as.numeric(ChBG$Time)))
+  yhat_allG$CFC14<-with(yhat_allG, (xG[["fr"]]*Br+xG[["fs"]]*Bs)-ChBG$Cmicinit[1])
+  yhat_allR<-as.data.frame(ode(y=c(G=ChBR$Sinit[1], Br=0, Bs=Bs_iR, CO2=0),
+                                func = SUBmodel, parms=xR, 
+                                times = as.numeric(ChBR$Time)))
+  yhat_allR$CFC14<-with(yhat_allR, (xR[["fr"]]*Br+xR[["fs"]]*Bs)-ChBR$Cmicinit[1])
+  #Selecting measured variables
+  yhatG<-yhat_allG[, c("time", "CO2", "CFC14")]
+  yhatR<-yhat_allR[, c("time", "CO2", "CFC14")]
+  #Long format
+  YhatG<-melt(yhatG, id.vars=c("time"))
+  YhatG$Substrate<-c("Glucose")
+  YhatR<-melt(yhatR, id.vars=c("time"))
+  YhatR$Substrate<-c("Maize")
+  Yhat<-rbind(YhatG, YhatR)
+  #Observations
+  Yhat$obs<-c(as.numeric(ChBG$CO2cumul), as.numeric(ChBG$Cmic14),
+              as.numeric(ChBR$CO2cumul), as.numeric(ChBR$Cmic14))
+  Gfit<-Yhat %>% group_by(variable, Substrate) %>% summarise(SSres=sum(((obs-value)^2), na.rm = T),
+                                                                   SStot=sum(((obs-mean(obs, na.rm = T))^2), na.rm = T),
+                                                                   ll=-sum(((obs-value)^2), na.rm = T)/2/(sd(obs, na.rm = T)^2))
+  Gfit$R2<-with(Gfit, 1-SSres/SStot)
+  Gfit$N<-length(xG)
+  Gfit$AIC<-with(Gfit, 2*N-2*ll)
+  
+  #Fine temporal scale fo r graphs
+  yhat_all_fineG<-as.data.frame(ode(y=c(G=ChBG$Sinit[1], Br=0, Bs=Bs_iG, CO2=0),
+                                     func = SUBmodel, parms=xG, 
+                                     times = seq(0, 50)))
+  yhat_all_fineG$CFC14<-with(yhat_all_fineG, (xG[["fr"]]*Br+xG[["fs"]]*Bs)-ChBG$Cmicinit[1])
+  yhat_all_fineR<-as.data.frame(ode(y=c(G=ChBR$Sinit[1], Br=0, Bs=Bs_iR, CO2=0),
+                                     func = SUBmodel, parms=xR, 
+                                     times = seq(0, 100)))
+  yhat_all_fineR$CFC14<-with(yhat_all_fineR, (xR[["fr"]]*Br+xR[["fs"]]*Bs)-ChBR$Cmicinit[1])
+  
+  Yhat_all_fineG<-melt(yhat_all_fineG, id.vars=c("time"))
+  Yhat_all_fineG$Substrate<-c("Glucose")
+  Yhat_all_fineR<-melt(yhat_all_fineR, id.vars=c("time"))
+  Yhat_all_fineR$Substrate<-c("Maize")
+  
+  Yhat_all_fine<-rbind(Yhat_all_fineG, Yhat_all_fineR)
+  
+  rsq_out<-list(Yhat=Yhat, Gfit=Gfit, Yhat_fine = Yhat_all_fine)
+  
+  return(rsq_out)
+}
+
+#Read parameters estimated in python
+ChB_optparG<-as.numeric(read.csv("parameters/ChB1991_optparsG.csv", header = F))
+ChB_optparR<-as.numeric(read.csv("parameters/ChB1991_optparsR.csv", header = F))
+
+ChB_fit<-good_sub(ChB_optparG, ChB_optparR)
+as.data.frame(ChB_fit$Gfit)
+
+#Figure
+ChB_fit$Yhat$variable2<-ChB_fit$Yhat$variable
+levels(ChB_fit$Yhat$variable2)<-c("CO[2]", "MBC")
+
+ChB_fit$Yhat_fine$variable2<-ChB_fit$Yhat_fine$variable
+levels(ChB_fit$Yhat_fine$variable2)<-c("Glucose", "Br", "Bs", "CO[2]", "MBC")
+
+ggplot(subset(ChB_fit$Yhat, variable=="CO2" | variable=="CFC14"), aes(time, obs))+
+  geom_point(cex=6, fill="grey")+
+  geom_line(data=subset(ChB_fit$Yhat_fine, variable=="CO2" | variable=="CFC14"), 
+            aes(time, value), lwd=1.2, color="grey30")+theme_min+
+  facet_wrap(Substrate~variable2, scales="free", labeller = label_parsed) + 
+  ylab(expression(paste("Carbon pool (", mu, "mol ", g(DW)^{-1}, ")"))) +
+  xlab("Time (days)")
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Monod model~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+#Model definition
+Monod<-function(time, state, pars){
+  with(as.list(c(state, pars)),{
+    #glucose uptake
+    uptake=v*G*B/(k + G)
+    #Decay rate
+    decay=m*B
+    #Respiration rate
+    r=(1-Y)*uptake + decay
+    #Chloroform labile C and DNA
+    #CFC14=(kec*B)-wu$Cmicinit[1]
+    
+    #States
+    dB<- uptake*Y - decay
+    dG<- - uptake
+    dCO2<- uptake*(1-Y)
+    
+    return(list(c(dB, dG, dCO2)))
+  })
+}
+
+#Goodness of fit
+monodgood<-function(xG, xR){
+  names(xG)<-c("v", "k", "m", "Y", "kec")
+  names(xR)<-c("v", "k", "m", "Y", "kec")
+  
+  #Initial Br and Bs
+  B_iG<-ChBG$Cmicinit[1]/xG[["kec"]]
+  B_iR<-ChBR$Cmicinit[1]/xR[["kec"]]
+  
+  #Simulations
+  yhat_allG<-as.data.frame(ode(y=c(B=B_iG, G=ChBG$Sinit[1], CO2=0),
+                                func = Monod, parms=xG,
+                                times = as.numeric(ChBG$Time)))
+  yhat_allG$CFC14<-with(yhat_allG, (xG[["kec"]]*B)-ChBG$Cmicinit[1])
+  yhat_allR<-as.data.frame(ode(y=c(B=B_iR, G=ChBR$Sinit[1], CO2=0),
+                                func = Monod, parms=xR,
+                                times = as.numeric(ChBR$Time)))
+  yhat_allR$CFC14<-with(yhat_allR, (xR[["kec"]]*B)-ChBR$Cmicinit[1])
+  #Selecting measured variables
+  yhatG<-yhat_allG[, c("time", "CO2", "CFC14")]
+  yhatR<-yhat_allR[, c("time", "CO2", "CFC14")]
+  #Long format
+  YhatG<-melt(yhatG, id.vars=c("time"))
+  YhatG$Substrate<-c("Glucose")
+  YhatR<-melt(yhatR, id.vars=c("time"))
+  YhatR$Substrate<-c("Maize")
+  Yhat<-rbind(YhatG, YhatR)
+  #Observations
+  Yhat$obs<-c(as.numeric(ChBG$CO2cumul), as.numeric(ChBG$Cmic14),
+              as.numeric(ChBR$CO2cumul), as.numeric(ChBR$Cmic14))
+  Gfit<-Yhat %>% group_by(variable, Substrate) %>% summarise(SSres=sum(((obs-value)^2), na.rm = T),
+                                                                   SStot=sum(((obs-mean(obs, na.rm = T))^2), na.rm = T),
+                                                                   ll=-sum(((obs-value)^2), na.rm = T)/2/(sd(obs, na.rm = T)^2))
+  Gfit$R2<-with(Gfit, 1-SSres/SStot)
+  Gfit$N<-length(xG)
+  Gfit$AIC<-with(Gfit, 2*N-2*ll)
+  
+  #Fine temporal scale for graphs
+  yhat_all_fineG<-as.data.frame(ode(y=c(B=B_iG, G=ChBG$Sinit[1], CO2=0),
+                                     func = Monod, parms=xG,
+                                     times = seq(0, 50)))
+  yhat_all_fineG$CFC14<-with(yhat_all_fineG, (xG[["kec"]]*B)-ChBG$Cmicinit[1])
+  yhat_all_fineR<-as.data.frame(ode(y=c(B=B_iR, G=ChBR$Sinit[1], CO2=0),
+                                     func = Monod, parms=xR,
+                                     times = seq(0, 100)))
+  yhat_all_fineR$CFC14<-with(yhat_all_fineR, (xR[["kec"]]*B)-ChBR$Cmicinit[1])
+  Yhat_all_fineG<-melt(yhat_all_fineG, id.vars=c("time"))
+  Yhat_all_fineG$Substrate<-c("Glucose")
+  Yhat_all_fineR<-melt(yhat_all_fineR, id.vars=c("time"))
+  Yhat_all_fineR$Substrate<-c("Maize")
+  
+  Yhat_all_fine<-rbind(Yhat_all_fineG, Yhat_all_fineR)
+  
+  rsq_out<-list(Yhat=Yhat, Gfit=Gfit, Yhat_fine = Yhat_all_fine)
+  
+  return(rsq_out)
+}
+
+#Read parameters estimated in python
+ChB_monodoptG<-as.numeric(read.csv("parameters/ChB1991_monodparsG.csv", header = F))
+ChB_monodoptR<-as.numeric(read.csv("parameters/ChB1991_monodparsR.csv", header = F))
+
+ChB_monodfit<-monodgood(ChB_monodoptG, ChB_monodoptR)
+as.data.frame(ChB_monodfit$Gfit)
+
+#Figure
+ChB_monodfit$Yhat_fine$variable2<-ChB_monodfit$Yhat_fine$variable
+levels(ChB_monodfit$Yhat_fine$variable2)<-c("B", "Glucose",  "CO[2]", "MBC")
+
+ChB_fita<-subset(ChB_fit$Yhat_fine, variable=="CO2" | variable=="CFC14")
+ChB_fita$Model<-c("Sub-microbial")
+ChB_fitb<-subset(ChB_monodfit$Yhat_fine, variable=="CO2" | variable=="CFC14")
+ChB_fitb$Model<-c("Monod")
+
+ChB_fit_all<-rbind(ChB_fita, ChB_fitb)
+
+ggplot(subset(ChB_fit$Yhat, variable=="CO2" | variable=="CFC14"), aes(time, obs))+
+  geom_point(cex=6, fill="grey")+
+  geom_line(data=ChB_fit_all, aes(time, value, color=Model), lwd=1.2)+theme_min+
+  facet_wrap(Substrate~variable2, scales="free", labeller = label_parsed) + 
+  ylab(expression(paste("Carbon pool (", mu, "mol ", g(DW)^{-1}, ")"))) +
+  xlab("Time (days)") + scale_color_manual(values = c("indianred", "grey30")) +
+  theme(legend.position = c(0.85, 0.8))
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Statistics~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+#Log Likelihood ratio test
+-2*(ChB_monodfit$Gfit$ll-ChB_fit$Gfit$ll)
+
+round(pchisq(-2*(ChB_monodfit$Gfit$ll-ChB_fit$Gfit$ll), df=8,
+             lower.tail = F), 3)
+
+#F test - based on residual sum of squares, number of parameters and number of measurements
+##Monod model
+###residual sum of squares
+M1ss = sum((ChB_monodfit$Yhat$obs-ChB_monodfit$Yhat$value)^2, na.rm = T)
+###number of parameters 
+M1p = 10
+
+##Sub-microbial model
+###residual sum of squares
+M2ss = sum((ChB_fit$Yhat$obs-ChB_fit$Yhat$value)^2, na.rm = T)
+###number of parameters 
+M2p = 14
+
+###total number of measurements
+nt = nrow(ChB_fit$Yhat[!is.na(ChB_fit$Yhat), ])
+
+####F value =  (M1ss - M2ss)*(nt - M2p)/M2ss/(M2p - M1p)
+(M1ss - M2ss)*(nt - M2p)/M2ss/(M2p - M1p)
+
+####associated p value
+pf(q=(M1ss - M2ss)*(nt - M2p)/M2ss/(M2p - M1p), 
+   df1=(M2p - M1p), 
+   df2=(nt - M2p), 
+   lower.tail=F)
