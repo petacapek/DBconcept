@@ -2257,3 +2257,269 @@ pf(q=(M1ss - M2ss)*(nt - M2p)/M2ss/(M2p - M1p),
    df1=(M2p - M1p), 
    df2=(nt - M2p), 
    lower.tail=F)
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+############################################################################################################################
+###################################################Bremer and Kessel, 1990##################################################
+############################################################################################################################
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+#DATA
+B1990<-read.csv("Data/Bremer1990.csv", sep=',')
+B1990HC1<-subset(B1990, Treatment=="HC1")
+B1990HC2<-subset(B1990, Treatment=="HC2")
+B1990LC<-subset(B1990, Treatment=="LC")
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Sub-microbial model~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+#Model definition
+SUBmodel<-function(time, state, pars){
+  with(as.list(c(state, pars)),{
+    #uptake
+    uptake=v*G*Bs/(k+G)
+    #Transfer function
+    transfer=f*Br
+    #death rate
+    death=m*Bs
+    #Respiration rate
+    r=transfer*(1-Y)
+    #Chloroform labile C and DNA
+    CFC14=(fr*Br+fs*Bs)-B1990$Cmicinit[1]
+    
+    #States
+    dG<- - uptake
+    dBr<- uptake - transfer
+    dBs<- transfer*Y - death
+    dCO2<- transfer*(1-Y)
+    
+    return(list(c(dG, dBr, dBs, dCO2), CFC14=CFC14))
+  })
+}
+#Goodness of fit
+good_sub<-function(x){
+  
+  names(x)<-c("v", "k", "f", "m", "Y", "fr", "fs")
+  #Initial Br and Bs
+  Bs_i<-B1990HC1$Cmicinit[1]/x[["fs"]]
+  
+  
+  #Simulations
+  ##HC1
+  yhat_allHC1<-as.data.frame(ode(y=c(G=B1990HC1$Sinit[1], Br=0, Bs=Bs_i, CO2=0),
+                               func = SUBmodel, parms=x, 
+                               times = as.numeric(B1990HC1$Time)))
+  ##HC2
+  yhat_allHC2<-as.data.frame(ode(y=c(G=B1990HC1$Sinit[1], Br=0, Bs=Bs_i, CO2=0),
+                                func = SUBmodel, parms=x, 
+                                times = as.numeric(B1990HC1$Time)))
+  ##LC
+  yhat_allLC<-as.data.frame(ode(y=c(G=B1990LC$Sinit[1], Br=0, Bs=Bs_i, CO2=0),
+                                func = SUBmodel, parms=x, 
+                                times = as.numeric(B1990HC1$Time)))
+  #Selecting measured variables
+  yhatHC1<-yhat_allHC1[, c("time", "CO2", "CFC14")]
+  yhatHC1$Treatment<-c("HC")
+  yhatHC2<-yhat_allHC2[, c("time", "CO2", "CFC14")]
+  yhatHC2$Treatment<-c("HC")
+  yhatLC<-yhat_allLC[, c("time", "CO2", "CFC14")]
+  yhatLC$Treatment<-c("LC")
+  #Long format
+  Yhat<-rbind(melt(yhatHC1, id.vars=c("time", "Treatment")), 
+              melt(yhatHC2, id.vars=c("time", "Treatment")),
+              melt(yhatLC, id.vars=c("time", "Treatment")))
+  
+  #Observations
+  Yhat$obs<-c(as.numeric(B1990HC1$CO2cumul), as.numeric(B1990HC1$Cmic14),
+              as.numeric(B1990HC2$CO2cumul), as.numeric(B1990HC2$Cmic14),
+              as.numeric(B1990LC$CO2cumul), as.numeric(B1990LC$Cmic14))
+  Gfit<-Yhat %>% group_by(variable) %>% summarise(SSres=sum(((obs-value)^2), na.rm = T),
+                                                  SStot=sum(((obs-mean(obs, na.rm = T))^2), na.rm = T),
+                                                  ll=-sum(((obs-value)^2), na.rm = T)/2/(sd(obs, na.rm = T)^2))
+  Gfit$R2<-with(Gfit, 1-SSres/SStot)
+  Gfit$N<-length(x)
+  Gfit$AIC<-with(Gfit, 2*N-2*ll)
+  
+  #Fine temporal scale fo r graphs
+  yhat_all_fineHC1<-as.data.frame(ode(y=c(G=B1990HC1$Sinit[1], Br=0, Bs=Bs_i, CO2=0),
+                                    func = SUBmodel, parms=x, 
+                                    times = seq(0, 7, by=0.1)))
+  yhat_all_fineHC2<-as.data.frame(ode(y=c(G=B1990HC1$Sinit[1], Br=0, Bs=Bs_i, CO2=0),
+                                      func = SUBmodel, parms=x, 
+                                      times = seq(0, 7, by=0.1)))
+  yhat_all_fineLC<-as.data.frame(ode(y=c(G=B1990LC$Sinit[1], Br=0, Bs=Bs_i, CO2=0),
+                                      func = SUBmodel, parms=x, 
+                                      times = seq(0, 7, by=0.1)))
+  yhat_all_fineHC1$Treatment<-c("HC")
+  yhat_all_fineHC2$Treatment<-c("HC")
+  yhat_all_fineLC$Treatment<-c("LC")
+  Yhat_all_fine<-rbind(melt(yhat_all_fineHC1, id.vars=c("time", "Treatment")),
+                       melt(yhat_all_fineHC2, id.vars=c("time", "Treatment")),
+                       melt(yhat_all_fineLC, id.vars=c("time", "Treatment")))
+  
+  rsq_out<-list(Yhat=Yhat, Gfit=Gfit, Yhat_fine = Yhat_all_fine)
+  
+  return(rsq_out)
+}
+
+#Read parameters estimated in python
+B1990_optpar<-as.numeric(read.csv("parameters/Bremer1990_optpars.csv", header = F))
+
+B1990_fit<-good_sub(B1990_optpar)
+as.data.frame(B1990_fit$Gfit)
+
+#Figure
+B1990_fit$Yhat$variable2<-B1990_fit$Yhat$variable
+levels(B1990_fit$Yhat$variable2)<-c("CO[2]", "MBC")
+
+B1990_fit$Yhat_fine$variable2<-B1990_fit$Yhat_fine$variable
+levels(B1990_fit$Yhat_fine$variable2)<-c("Glucose", "Br", "Bs", "CO[2]", "MBC")
+
+ggplot(subset(B1990_fit$Yhat, variable=="CO2" | variable=="CFC14"), aes(time, obs))+
+  geom_point(cex=6, aes(color=Treatment))+
+  scale_color_manual(values=c("black", "grey40"))+
+  geom_line(data=subset(B1990_fit$Yhat_fine, variable=="CO2" | variable=="CFC14"), 
+            aes(time, value, color=Treatment), lwd=1.2)+theme_min+
+  facet_wrap(~variable2, scales="free", labeller = label_parsed) + 
+  ylab(expression(paste("Carbon pool (", mu, "mol ", g(DW)^{-1}, ")"))) +
+  xlab("Time (days)")
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Monod model~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+#Model definition
+Monod<-function(time, state, pars){
+  with(as.list(c(state, pars)),{
+    #glucose uptake
+    uptake=v*G*B/(k + G)
+    #Decay rate
+    decay=m*B
+    #Respiration rate
+    r=(1-Y)*uptake + decay
+    #Chloroform labile C and DNA
+    CFC14=(kec*B)-B1990$Cmicinit[1]
+    
+    #States
+    dB<- uptake*Y - decay
+    dG<- - uptake
+    dCO2<- uptake*(1-Y)
+    
+    return(list(c(dB, dG, dCO2), CFC14=CFC14))
+  })
+}
+
+#Goodness of fit
+monodgood<-function(x){
+  names(x)<-c("v", "k", "m", "Y", "kec")
+  
+  #Initial Br and Bs
+  B_i<-B1990$Cmicinit[1]/x[["kec"]]
+  
+  ##HC1
+  yhat_allHC1<-as.data.frame(ode(y=c(B=B_i, G=B1990HC1$Sinit[1], CO2=0),
+                                 func = Monod, parms=x, 
+                                 times = as.numeric(B1990HC1$Time)))
+  ##HC2
+  yhat_allHC2<-as.data.frame(ode(y=c(B=B_i, G=B1990HC1$Sinit[1], CO2=0),
+                                 func = Monod, parms=x, 
+                                 times = as.numeric(B1990HC1$Time)))
+  ##LC
+  yhat_allLC<-as.data.frame(ode(y=c(B=B_i, G=B1990LC$Sinit[1], CO2=0),
+                                func = Monod, parms=x, 
+                                times = as.numeric(B1990HC1$Time)))
+  #Selecting measured variables
+  yhatHC1<-yhat_allHC1[, c("time", "CO2", "CFC14")]
+  yhatHC1$Treatment<-c("HC")
+  yhatHC2<-yhat_allHC2[, c("time", "CO2", "CFC14")]
+  yhatHC2$Treatment<-c("HC")
+  yhatLC<-yhat_allLC[, c("time", "CO2", "CFC14")]
+  yhatLC$Treatment<-c("LC")
+  #Long format
+  Yhat<-rbind(melt(yhatHC1, id.vars=c("time", "Treatment")), 
+              melt(yhatHC2, id.vars=c("time", "Treatment")),
+              melt(yhatLC, id.vars=c("time", "Treatment")))
+  
+  #Observations
+  Yhat$obs<-c(as.numeric(B1990HC1$CO2cumul), as.numeric(B1990HC1$Cmic14),
+              as.numeric(B1990HC2$CO2cumul), as.numeric(B1990HC2$Cmic14),
+              as.numeric(B1990LC$CO2cumul), as.numeric(B1990LC$Cmic14))
+  Gfit<-Yhat %>% group_by(variable) %>% summarise(SSres=sum(((obs-value)^2), na.rm = T),
+                                                             SStot=sum(((obs-mean(obs, na.rm = T))^2), na.rm = T),
+                                                             ll=-sum(((obs-value)^2), na.rm = T)/2/(sd(obs, na.rm = T)^2))
+  Gfit$R2<-with(Gfit, 1-SSres/SStot)
+  Gfit$N<-length(x)
+  Gfit$AIC<-with(Gfit, 2*N-2*ll)
+  
+  #Fine temporal scale fo r graphs
+  yhat_all_fineHC1<-as.data.frame(ode(y=c(B=B_i, G=B1990HC1$Sinit[1], CO2=0),
+                                      func = Monod, parms=x, 
+                                      times = seq(0, 7, by=0.1)))
+  yhat_all_fineHC2<-as.data.frame(ode(y=c(B=B_i, G=B1990HC1$Sinit[1], CO2=0),
+                                      func = Monod, parms=x, 
+                                      times = seq(0, 7, by=0.1)))
+  yhat_all_fineLC<-as.data.frame(ode(y=c(B=B_i, G=B1990LC$Sinit[1], CO2=0),
+                                     func = Monod, parms=x, 
+                                     times = seq(0, 7, by=0.1)))
+  yhat_all_fineHC1$Treatment<-c("HC")
+  yhat_all_fineHC2$Treatment<-c("HC")
+  yhat_all_fineLC$Treatment<-c("LC")
+  Yhat_all_fine<-rbind(melt(yhat_all_fineHC1, id.vars=c("time", "Treatment")),
+                       melt(yhat_all_fineHC2, id.vars=c("time", "Treatment")),
+                       melt(yhat_all_fineLC, id.vars=c("time", "Treatment")))
+  
+  rsq_out<-list(Yhat=Yhat, Gfit=Gfit, Yhat_fine = Yhat_all_fine)
+  
+  return(rsq_out)
+}
+
+#Read parameters estimated in python
+B1990_monodopt<-as.numeric(read.csv("parameters/Bremer1990_monodpars.csv", header = F))
+
+B1990_monodfit<-monodgood(B1990_monodopt)
+as.data.frame(ChB_monodfit$Gfit)
+
+#Figure
+B1990_monodfit$Yhat_fine$variable2<-B1990_monodfit$Yhat_fine$variable
+levels(B1990_monodfit$Yhat_fine$variable2)<-c("B", "Glucose",  "CO[2]", "MBC")
+
+B1990_fita<-subset(B1990_fit$Yhat_fine, variable=="CO2" | variable=="CFC14")
+B1990_fita$Model<-c("Sub-microbial")
+B1990_fitb<-subset(B1990_monodfit$Yhat_fine, variable=="CO2" | variable=="CFC14")
+B1990_fitb$Model<-c("Monod")
+
+B1990_fit_all<-rbind(B1990_fita, B1990_fitb)
+
+ggplot(subset(B1990_fit$Yhat, variable=="CO2" | variable=="CFC14"), aes(time, obs))+
+  geom_point(cex=6, aes(pch=Treatment))+
+  geom_line(data=B1990_fit_all, aes(time, value, color=Model, linetype=Treatment), lwd=1.2)+theme_min+
+  facet_wrap(~variable2, scales="free", labeller = label_parsed) + 
+  ylab(expression(paste("Carbon pool (", mu, "mol ", g(DW)^{-1}, ")"))) +
+  xlab("Time (days)") + scale_color_manual(values = c("indianred", "grey30")) +
+  theme(legend.position = c(0.85, 0.8))
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Statistics~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+#Log Likelihood ratio test
+-2*(B1990_monodfit$Gfit$ll-B1990_fit$Gfit$ll)
+
+round(pchisq(-2*(B1990_monodfit$Gfit$ll-B1990_fit$Gfit$ll), df=2,
+             lower.tail = F), 3)
+
+#F test - based on residual sum of squares, number of parameters and number of measurements
+##Monod model
+###residual sum of squares
+M1ss = sum((B1990_monodfit$Yhat$obs-B1990_monodfit$Yhat$value)^2, na.rm = T)
+###number of parameters 
+M1p = 5
+
+##Sub-microbial model
+###residual sum of squares
+M2ss = sum((B1990_fit$Yhat$obs-B1990_fit$Yhat$value)^2, na.rm = T)
+###number of parameters 
+M2p = 7
+
+###total number of measurements
+nt = nrow(B1990_fit$Yhat[!is.na(B1990_fit$Yhat), ])
+
+####F value =  (M1ss - M2ss)*(nt - M2p)/M2ss/(M2p - M1p)
+(M1ss - M2ss)*(nt - M2p)/M2ss/(M2p - M1p)
+
+####associated p value
+pf(q=(M1ss - M2ss)*(nt - M2p)/M2ss/(M2p - M1p), 
+   df1=(M2p - M1p), 
+   df2=(nt - M2p), 
+   lower.tail=F)
