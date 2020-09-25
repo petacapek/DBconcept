@@ -1364,30 +1364,26 @@ SUBmodel<-function(time, state, pars){
 }
 
 #Goodness of fit
-good_sub<-function(xG1, xG2, xR1, xR2){
+good_sub<-function(xG, xR){
   
-  names(xG1)<-c("v", "k", "f", "m", "Y", "fr", "fs")
-  names(xG2)<-c("v", "k", "f", "m", "Y", "fr", "fs")
-  names(xR1)<-c("v", "k", "f", "m", "Y", "fr", "fs")
-  names(xR2)<-c("v", "k", "f", "m", "Y", "fr", "fs")
+  names(xG)<-c("v", "k", "f", "m", "Y", "fr", "fs")
+  names(xR)<-c("v", "k", "f", "m", "Y", "fr", "fs")
   #Initial Br and Bs
-  Bs_iG1<-wu$Cmicinit[1]/xG1[["fs"]]
-  Bs_iG2<-wu$Cmicinit[1]/xG2[["fs"]]
-  Bs_iR1<-wu$Cmicinit[1]/xR1[["fs"]]
-  Bs_iR2<-wu$Cmicinit[1]/xR2[["fs"]]
+  Bs_iG<-wu$Cmicinit[1]/xG[["fs"]]
+  Bs_iR<-wu$Cmicinit[1]/xR[["fs"]]
   
   #Simulations
-  yhat_allG1<-as.data.frame(ode(y=c(G=wuG1$Sinit[1], Br=0, Bs=Bs_iG1, CO2=0),
-                               func = SUBmodel, parms=xG1, 
+  yhat_allG1<-as.data.frame(ode(y=c(G=wuG1$Sinit[1], Br=0, Bs=Bs_iG, CO2=0),
+                               func = SUBmodel, parms=xG, 
                                times = as.numeric(wuG1$Time)))
-  yhat_allG2<-as.data.frame(ode(y=c(G=wuG2$Sinit[1], Br=0, Bs=Bs_iG2, CO2=0),
-                               func = SUBmodel, parms=xG2,
+  yhat_allG2<-as.data.frame(ode(y=c(G=wuG2$Sinit[1], Br=0, Bs=Bs_iG, CO2=0),
+                               func = SUBmodel, parms=xG,
                                times = as.numeric(wuG2$Time)))
-  yhat_allR1<-as.data.frame(ode(y=c(G=wuR1$Sinit[1], Br=0, Bs=Bs_iR1, CO2=0),
-                                func = SUBmodel, parms=xR1,
+  yhat_allR1<-as.data.frame(ode(y=c(G=wuR1$Sinit[1], Br=0, Bs=Bs_iR, CO2=0),
+                                func = SUBmodel, parms=xR,
                                 times = as.numeric(wuR1$Time)))
-  yhat_allR2<-as.data.frame(ode(y=c(G=wuR2$Sinit[1], Br=0, Bs=Bs_iR2, CO2=0),
-                                func = SUBmodel, parms=xR2,
+  yhat_allR2<-as.data.frame(ode(y=c(G=wuR2$Sinit[1], Br=0, Bs=Bs_iR, CO2=0),
+                                func = SUBmodel, parms=xR,
                                 times = as.numeric(wuR2$Time)))
   #Selecting measured variables
   yhatG1<-yhat_allG1[, c("time", "CO2", "CFC14")]
@@ -1413,25 +1409,25 @@ good_sub<-function(xG1, xG2, xR1, xR2){
               as.numeric(wuG2$CO2cumul), as.numeric(wuG2$Cmic14),
               as.numeric(wuR1$CO2cumul), as.numeric(wuR1$Cmic14),
               as.numeric(wuR2$CO2cumul), as.numeric(wuR2$Cmic14))
-  Gfit<-Yhat %>% group_by(variable, Substrate, Treatment) %>% summarise(SSres=sum(((obs-value)^2), na.rm = T),
+  Gfit<-Yhat %>% group_by(variable, Substrate) %>% summarise(SSres=sum(((obs-value)^2), na.rm = T),
                                                   SStot=sum(((obs-mean(obs, na.rm = T))^2), na.rm = T),
                                                   ll=-sum(((obs-value)^2), na.rm = T)/2/(sd(obs, na.rm = T)^2))
   Gfit$R2<-with(Gfit, 1-SSres/SStot)
-  Gfit$N<-length(xG1)
+  Gfit$N<-length(xG)
   Gfit$AIC<-with(Gfit, 2*N-2*ll)
   
   #Fine temporal scale fo r graphs
-  yhat_all_fineG1<-as.data.frame(ode(y=c(G=wuG1$Sinit[1], Br=0, Bs=Bs_iG1, CO2=0),
-                                    func = SUBmodel, parms=xG1,
+  yhat_all_fineG1<-as.data.frame(ode(y=c(G=wuG1$Sinit[1], Br=0, Bs=Bs_iG, CO2=0),
+                                    func = SUBmodel, parms=xG,
                                     times = seq(0, 105)))
-  yhat_all_fineG2<-as.data.frame(ode(y=c(G=wuG2$Sinit[1], Br=0, Bs=Bs_iG2, CO2=0),
-                                    func = SUBmodel, parms=xG2,
+  yhat_all_fineG2<-as.data.frame(ode(y=c(G=wuG2$Sinit[1], Br=0, Bs=Bs_iG, CO2=0),
+                                    func = SUBmodel, parms=xG,
                                     times = seq(0, 105)))
-  yhat_all_fineR1<-as.data.frame(ode(y=c(G=wuR1$Sinit[1], Br=0, Bs=Bs_iR1, CO2=0),
-                                    func = SUBmodel, parms=xR1,
+  yhat_all_fineR1<-as.data.frame(ode(y=c(G=wuR1$Sinit[1], Br=0, Bs=Bs_iR, CO2=0),
+                                    func = SUBmodel, parms=xR,
                                     times = seq(0, 150)))
-  yhat_all_fineR2<-as.data.frame(ode(y=c(G=wuR2$Sinit[1], Br=0, Bs=Bs_iR2, CO2=0),
-                                    func = SUBmodel, parms=xR2,
+  yhat_all_fineR2<-as.data.frame(ode(y=c(G=wuR2$Sinit[1], Br=0, Bs=Bs_iR, CO2=0),
+                                    func = SUBmodel, parms=xR,
                                     times = seq(0, 150)))
   Yhat_all_fineG1<-melt(yhat_all_fineG1, id.vars=c("time"))
   Yhat_all_fineG1$Substrate<-c("Glucose")
@@ -1455,12 +1451,10 @@ good_sub<-function(xG1, xG2, xR1, xR2){
 }
 
 #Read parameters estimated in python
-wu_optparG1<-as.numeric(read.csv("parameters/wu_optparsG1.csv", header = F))
-wu_optparG2<-as.numeric(read.csv("parameters/wu_optparsG2.csv", header = F))
-wu_optparR1<-as.numeric(read.csv("parameters/wu_optparsR1.csv", header = F))
-wu_optparR2<-as.numeric(read.csv("parameters/wu_optparsR2.csv", header = F))
+wu_optparG<-as.numeric(read.csv("parameters/wu_optparsG.csv", header = F))
+wu_optparR<-as.numeric(read.csv("parameters/wu_optparsR.csv", header = F))
 
-Wu_fit<-good_sub(wu_optparG1, wu_optparG2, wu_optparR1, wu_optparR2)
+Wu_fit<-good_sub(wu_optparG, wu_optparR)
 as.data.frame(Wu_fit$Gfit)
 
 #Figure
@@ -1503,30 +1497,26 @@ Monod<-function(time, state, pars){
 }
 
 #Goodness of fit
-monodgood<-function(xG1, xG2, xR1, xR2){
-  names(xG1)<-c("v", "k", "m", "Y", "kec")
-  names(xG2)<-c("v", "k", "m", "Y", "kec")
-  names(xR1)<-c("v", "k", "m", "Y", "kec")
-  names(xR2)<-c("v", "k", "m", "Y", "kec")
+monodgood<-function(xG, xR){
+  names(xG)<-c("v", "k", "m", "Y", "kec")
+  names(xR)<-c("v", "k", "m", "Y", "kec")
   
   #Initial Br and Bs
-  B_iG1<-wu$Cmicinit[1]/xG1[["kec"]]
-  B_iG2<-wu$Cmicinit[1]/xG2[["kec"]]
-  B_iR1<-wu$Cmicinit[1]/xR1[["kec"]]
-  B_iR2<-wu$Cmicinit[1]/xR2[["kec"]]
+  B_iG<-wu$Cmicinit[1]/xG[["kec"]]
+  B_iR<-wu$Cmicinit[1]/xR[["kec"]]
   
   #Simulations
-  yhat_allG1<-as.data.frame(ode(y=c(B=B_iG1, G=wuG1$Sinit[1], CO2=0),
-                               func = Monod, parms=xG1,
+  yhat_allG1<-as.data.frame(ode(y=c(B=B_iG, G=wuG1$Sinit[1], CO2=0),
+                               func = Monod, parms=xG,
                                times = as.numeric(wuG1$Time)))
-  yhat_allG2<-as.data.frame(ode(y=c(B=B_iG2, G=wuG2$Sinit[1], CO2=0),
-                               func = Monod, parms=xG2,
+  yhat_allG2<-as.data.frame(ode(y=c(B=B_iG, G=wuG2$Sinit[1], CO2=0),
+                               func = Monod, parms=xG,
                                times = as.numeric(wuG2$Time)))
-  yhat_allR1<-as.data.frame(ode(y=c(B=B_iR1, G=wuR1$Sinit[1], CO2=0),
-                                func = Monod, parms=xR1,
+  yhat_allR1<-as.data.frame(ode(y=c(B=B_iR, G=wuR1$Sinit[1], CO2=0),
+                                func = Monod, parms=xR,
                                 times = as.numeric(wuR1$Time)))
-  yhat_allR2<-as.data.frame(ode(y=c(B=B_iR2, G=wuR2$Sinit[1], CO2=0),
-                                func = Monod, parms=xR2,
+  yhat_allR2<-as.data.frame(ode(y=c(B=B_iR, G=wuR2$Sinit[1], CO2=0),
+                                func = Monod, parms=xR,
                                 times = as.numeric(wuR2$Time)))
   #Selecting measured variables
   yhatG1<-yhat_allG1[, c("time", "CO2", "CFC14")]
@@ -1552,25 +1542,25 @@ monodgood<-function(xG1, xG2, xR1, xR2){
               as.numeric(wuG2$CO2cumul), as.numeric(wuG2$Cmic14),
               as.numeric(wuR1$CO2cumul), as.numeric(wuR1$Cmic14),
               as.numeric(wuR2$CO2cumul), as.numeric(wuR2$Cmic14))
-  Gfit<-Yhat %>% group_by(variable, Substrate, Treatment) %>% summarise(SSres=sum(((obs-value)^2), na.rm = T),
+  Gfit<-Yhat %>% group_by(variable, Substrate) %>% summarise(SSres=sum(((obs-value)^2), na.rm = T),
                                                                         SStot=sum(((obs-mean(obs, na.rm = T))^2), na.rm = T),
                                                                         ll=-sum(((obs-value)^2), na.rm = T)/2/(sd(obs, na.rm = T)^2))
   Gfit$R2<-with(Gfit, 1-SSres/SStot)
-  Gfit$N<-length(xG1)
+  Gfit$N<-length(xG)
   Gfit$AIC<-with(Gfit, 2*N-2*ll)
   
   #Fine temporal scale for graphs
-  yhat_all_fineG1<-as.data.frame(ode(y=c(B=B_iG1, G=wuG1$Sinit[1], CO2=0),
-                                    func = Monod, parms=xG1,
+  yhat_all_fineG1<-as.data.frame(ode(y=c(B=B_iG, G=wuG1$Sinit[1], CO2=0),
+                                    func = Monod, parms=xG,
                                     times = seq(0, 105)))
-  yhat_all_fineG2<-as.data.frame(ode(y=c(B=B_iG2, G=wuG2$Sinit[1], CO2=0),
-                                    func = Monod, parms=xG2,
+  yhat_all_fineG2<-as.data.frame(ode(y=c(B=B_iG, G=wuG2$Sinit[1], CO2=0),
+                                    func = Monod, parms=xG,
                                     times = seq(0, 105)))
-  yhat_all_fineR1<-as.data.frame(ode(y=c(B=B_iR1, G=wuR1$Sinit[1], CO2=0),
-                                     func = Monod, parms=xR1,
+  yhat_all_fineR1<-as.data.frame(ode(y=c(B=B_iR, G=wuR1$Sinit[1], CO2=0),
+                                     func = Monod, parms=xR,
                                      times = seq(0, 150)))
-  yhat_all_fineR2<-as.data.frame(ode(y=c(B=B_iR2, G=wuR2$Sinit[1], CO2=0),
-                                     func = Monod, parms=xR2,
+  yhat_all_fineR2<-as.data.frame(ode(y=c(B=B_iR, G=wuR2$Sinit[1], CO2=0),
+                                     func = Monod, parms=xR,
                                      times = seq(0, 150)))
   Yhat_all_fineG1<-melt(yhat_all_fineG1, id.vars=c("time"))
   Yhat_all_fineG1$Substrate<-c("Glucose")
@@ -1594,12 +1584,10 @@ monodgood<-function(xG1, xG2, xR1, xR2){
 }
 
 #Read parameters estimated in python
-wu_monodoptG1<-as.numeric(read.csv("parameters/wu_monodparsG1.csv", header = F))
-wu_monodoptG2<-as.numeric(read.csv("parameters/wu_monodparsG2.csv", header = F))
-wu_monodoptR1<-as.numeric(read.csv("parameters/wu_monodparsR1.csv", header = F))
-wu_monodoptR2<-as.numeric(read.csv("parameters/wu_monodparsR2.csv", header = F))
+wu_monodoptG<-as.numeric(read.csv("parameters/wu_monodparsG.csv", header = F))
+wu_monodoptR<-as.numeric(read.csv("parameters/wu_monodparsR.csv", header = F))
 
-Wu_monodfit<-monodgood(wu_monodoptG1, wu_monodoptG2, wu_monodoptR1, wu_monodoptR2)
+Wu_monodfit<-monodgood(wu_monodoptG, wu_monodoptR)
 as.data.frame(Wu_monodfit$Gfit)
 
 #Figure
@@ -1626,7 +1614,7 @@ ggplot(subset(Wu_fit$Yhat, variable=="CO2" | variable=="CFC14"), aes(time, obs))
 #Log Likelihood ratio test
 -2*(Wu_monodfit$Gfit$ll-Wu_fit$Gfit$ll)
 
-round(pchisq(-2*(Wu_monodfit$Gfit$ll-Wu_fit$Gfit$ll), df=8,
+round(pchisq(-2*(Wu_monodfit$Gfit$ll-Wu_fit$Gfit$ll), df=4,
              lower.tail = F), 3)
 
 #F test - based on residual sum of squares, number of parameters and number of measurements
@@ -1634,13 +1622,13 @@ round(pchisq(-2*(Wu_monodfit$Gfit$ll-Wu_fit$Gfit$ll), df=8,
 ###residual sum of squares
 M1ss = sum((Wu_monodfit$Yhat$obs-Wu_monodfit$Yhat$value)^2, na.rm = T)
 ###number of parameters 
-M1p = 20
+M1p = 10
 
 ##Sub-microbial model
 ###residual sum of squares
 M2ss = sum((Wu_fit$Yhat$obs-Wu_fit$Yhat$value)^2, na.rm = T)
 ###number of parameters 
-M2p = 28
+M2p = 14
 
 ###total number of measurements
 nt = nrow(Wu_fit$Yhat[!is.na(Wu_fit$Yhat), ])
@@ -2523,3 +2511,4 @@ pf(q=(M1ss - M2ss)*(nt - M2p)/M2ss/(M2p - M1p),
    df1=(M2p - M1p), 
    df2=(nt - M2p), 
    lower.tail=F)
+  
