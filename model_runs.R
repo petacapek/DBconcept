@@ -123,6 +123,93 @@ ggplot(subset(Marstorp_fit$Yhat, variable=="CO2" | variable=="DNA" | variable=="
   ylab(expression(paste("Carbon pool (", mu, "mol ", g(DW)^{-1}, ")"))) +
   xlab("Time (days)")
 
+#Model definition
+DEBmodel<-function(time, state, pars){
+  with(as.list(c(state, pars)),{
+    #Define fluxes
+    ##scaling function for substrate
+    f=G/(500+G)
+    ##growth rate
+    growth=(v*e-m*g)/(m+g)
+    ##CO2 yield
+    Yco2=((v*f/Im)+(m*g/Im)+max(g*growth/Im,0))*ce/f
+    
+    #Chloroform labile C and DNA
+    Cwcfc=mar$Cmicinit[1]*Cwdna/mar$DNAinit[1]
+    CFC=(Cwcfc+Cecfc*e)*w
+    CFC14=(Cwcfc+Cecfc*e)*w-mar$Cmicinit[1]
+    DNA=Cwdna*w
+    
+    
+    #States
+    #Define derivatives
+    dG=-f*w*Im
+    de=v*f-v*e
+    dw=growth*w
+    dCO2=f*w*Im*Yco2
+    
+    return(list(c(dG, de, dw, dCO2), CFC=CFC, CFC14=CFC14, DNA=DNA))
+  })
+}
+
+#Goodness of fit
+good_DEB<-function(x){
+  p<-x
+  names(p)<-c("Im", "v", "m", "g", "ce", "Cwdna", "Cecfc")
+  #Initial Br and Bs
+  w_i<-mar$DNAinit[1]/p[["Cwdna"]]
+  #Br_i<-(mar$Cmicinit[1]-p[["fs"]]*Bs_i)/p[["fr"]]
+  #Simulations
+  yhat_all<-as.data.frame(ode(y=c(G=mar$Sinit[1], e=0, w=w_i, CO2=0),
+                              func = DEBmodel, parms=p,
+                              times = as.numeric(mar$Time)*24))
+  #Selecting measured variables
+  yhat<-yhat_all[, c("time", "CO2", "DNA", "CFC14", "CFC", "G")]
+  #Long format
+  Yhat<-melt(yhat, id.vars=c("time"))
+  #Observations
+  Yhat$obs<-c(as.numeric(mar$CO212cumul), as.numeric(mar$DNA), as.numeric(mar$Cmic14),
+              as.numeric(mar$Cmic12+mar$Cmic14), as.numeric(mar$S))
+  Gfit<-Yhat %>% group_by(variable) %>% summarise(SSres=sum(((obs-value)^2), na.rm = T),
+                                                  SStot=sum(((obs-mean(obs, na.rm = T))^2), na.rm = T),
+                                                  ll=-sum(((obs-value)^2), na.rm = T)/2/(sd(obs, na.rm = T)^2))
+  Gfit$R2<-with(Gfit, 1-SSres/SStot)
+  Gfit$N<-length(p)
+  Gfit$AIC<-with(Gfit, 2*N-2*ll)
+  
+  #Fine temporal scale fo r graphs
+  yhat_all_fine<-as.data.frame(ode(y=c(G=mar$Sinit[1], e=0, w=w_i, CO2=0),
+                                   func = DEBmodel, parms=p,
+                                   times = seq(0, 8.5, by=0.1)*24))
+  Yhat_all_fine<-melt(yhat_all_fine, id.vars=c("time"))
+  
+  rsq_out<-list(Yhat=Yhat, Gfit=Gfit, Yhat_fine = Yhat_all_fine)
+  
+  return(rsq_out)
+}
+
+#Read parameters estimated in python
+marstorp_optparDEB<-as.numeric(read.csv("parameters/marstorp_optparsDEB.csv", header = F))
+
+Marstorp_fitDEB<-good_DEB(marstorp_optparDEB)
+as.data.frame(Marstorp_fitDEB$Gfit)
+
+#Figure
+Marstorp_fitDEB$Yhat$variable2<-Marstorp_fitDEB$Yhat$variable
+levels(Marstorp_fitDEB$Yhat$variable2)<-c("CO[2]", "DNA", "MB^{14}~C", "MBC", "Glucose")
+
+Marstorp_fitDEB$Yhat_fine$variable2<-Marstorp_fitDEB$Yhat_fine$variable
+levels(Marstorp_fitDEB$Yhat_fine$variable2)<-c("Glucose", "Br", "Bs", "CO[2]", "MBC", "MB^{14}~C", "DNA", "Respiration")
+
+ggplot(subset(Marstorp_fitDEB$Yhat, variable=="CO2" | variable=="DNA" | variable=="CFC14" | 
+                variable=="CFC" | variable=="G"), aes(time, obs))+
+  geom_point(cex=6, pch=21, fill="grey")+
+  geom_line(data=subset(Marstorp_fitDEB$Yhat_fine, variable=="CO2" | variable=="DNA" | variable=="CFC14" | 
+                          variable=="CFC" | variable=="G"), aes(time, value), lwd=1.2, color="grey30")+theme_min+
+  facet_wrap(~variable2, scales="free", labeller = label_parsed) + 
+  ylab(expression(paste("Carbon pool (", mu, "mol ", g(DW)^{-1}, ")"))) +
+  xlab("Time (days)")
+
     
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Monod model~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
 #Model definition
@@ -215,9 +302,9 @@ ggplot(subset(Marstorp_fit$Yhat, variable=="CO2" | variable=="DNA" | variable=="
         
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Statistics~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
 #Log Likelihood ratio test
--2*(Marstorp_monodfit$Gfit$ll-Marstorp_fit$Gfit$ll)
+-2*(Marstorp_monodfit$Gfit$ll-Marstorp_fitDEB$Gfit$ll)
 
-round(pchisq(-2*(Marstorp_monodfit$Gfit$ll-Marstorp_fit$Gfit$ll), df=(length(marstorp_optpar)-length(marstorp_monodopt)),
+round(pchisq(-2*(Marstorp_monodfit$Gfit$ll-Marstorp_fitDEB$Gfit$ll), df=(length(marstorp_optpar)-length(marstorp_monodopt)),
        lower.tail = F), 3)
 
 #F test - based on residual sum of squares, number of parameters and number of measurements
@@ -229,12 +316,12 @@ M1p = length(marstorp_monodopt)
 
 ##Sub-microbial model
 ###residual sum of squares
-M2ss = sum((Marstorp_fit$Yhat$obs-Marstorp_fit$Yhat$value)^2, na.rm = T)
+M2ss = sum((Marstorp_fitDEB$Yhat$obs-Marstorp_fitDEB$Yhat$value)^2, na.rm = T)
 ###number of parameters 
 M2p = length(marstorp_optpar)
 
 ###total number of measurements
-nt = nrow(Marstorp_fit$Yhat[!is.na(Marstorp_fit$Yhat), ])
+  nt = nrow(Marstorp_fitDEB$Yhat[!is.na(Marstorp_fit$Yhat), ])
 
 ####F value =  (M1ss - M2ss)*(nt - M2p)/M2ss/(M2p - M1p)
 (M1ss - M2ss)*(nt - M2p)/M2ss/(M2p - M1p)
