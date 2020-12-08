@@ -31,12 +31,12 @@ theme_min<-theme(axis.text.x=element_text(vjust=0.2, size=18, colour="black"),
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
 ############################################################################################################################
-############################################Marstorp and Witter, 1999#######################################################
+############################################Santruckova et al. 2004#######################################################
 ############################################################################################################################
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
 #DATA
-mar<-read.csv("Data/Marstorp1999.csv", sep=',')
-
+d<-read.csv("Data/Wu1993.csv", sep=',')
+d<-subset(d, Substrate=="Glucose")
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Monod model~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
 Monod<-function(time, state, pars){
   with(as.list(c(state, pars)),{
@@ -44,19 +44,15 @@ Monod<-function(time, state, pars){
     uptake=v*G*B/(k + G)
     #Decay rate
     decay=m*B
-    #Chloroform labile C and DNA
-    kec=mar$Cmicinit[1]/(mar$DNAinit[1]/kd)
-    CFC=kec*B
-    CFC14=kec*B-mar$Cmicinit[1]
-    DNA=kd*B
-    
+    #Chloroform labile C
+    CFC14=kec*B-d$Cmicinit[1]
     
     #States
     dB<- uptake*Y - decay
     dG<- - uptake
     dCO2<- uptake*(1-Y)
     
-    return(list(c(dB, dG, dCO2), CFC=CFC, CFC14=CFC14, DNA=DNA))
+    return(list(c(dB, dG, dCO2), CFC14=CFC14))
   })
 }
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Mend model~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
@@ -71,19 +67,15 @@ Mend<-function(time, state, pars){
     maintenance=(1/Y-1)*h*B*G/(k+G)
     ##decay
     decay=B*h
-    #Chloroform labile C and DNA
-    kec=mar$Cmicinit[1]/(mar$DNAinit[1]/kd)
-    CFC=kec*B
-    CFC14=kec*B-mar$Cmicinit[1]
-    DNA=kd*B
-    
+    #Chloroform labile C
+    CFC14=kec*B-d$Cmicinit[1]
     
     #Define derivatives
     dB=uptake-gresp-maintenance-decay
     dG=-uptake
     dCO2=gresp+maintenance
     
-    return(list(c(dB, dG, dCO2), CFC=CFC, CFC14=CFC14, DNA=DNA))
+    return(list(c(dB, dG, dCO2), CFC14=CFC14))
   })
 }
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Pirt model~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
@@ -95,19 +87,15 @@ Pirt<-function(time, state, pars){
     decay=m*B
     #Maintenance
     maintenance=B*h
-    #Chloroform labile C and DNA
-    kec=mar$Cmicinit[1]/(mar$DNAinit[1]/kd)
-    CFC=kec*B
-    CFC14=kec*B-mar$Cmicinit[1]
-    DNA=kd*B
-    
+    #Chloroform labile C
+    CFC14=kec*B-d$Cmicinit[1]
     
     #States
     dB<- uptake*Y - decay - maintenance
     dG<- - uptake
     dCO2<- uptake*(1-Y) + maintenance
     
-    return(list(c(dB, dG, dCO2), CFC=CFC, CFC14=CFC14, DNA=DNA))
+    return(list(c(dB, dG, dCO2), CFC14=CFC14))
   })
 }
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~DEB model~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
@@ -121,12 +109,8 @@ DEBmodel<-function(time, state, pars){
     ##CO2 yield
     Yco2=((v*f/Im)+(m*g/Im)+max(g*growth/Im,0))*ce/f
     
-    #Chloroform labile C and DNA
-    Cwcfc=mar$Cmicinit[1]*Cwdna/mar$DNAinit[1]
-    CFC=(Cwcfc+Cecfc*e)*w
-    CFC14=(Cwcfc+Cecfc*e)*w-mar$Cmicinit[1]
-    DNA=Cwdna*w
-    
+    #Chloroform labile C
+    CFC14=(Cwcfc+Cecfc*e)*w-d$Cmicinit[1]
     
     #States
     #Define derivatives
@@ -135,7 +119,7 @@ DEBmodel<-function(time, state, pars){
     dw=growth*w
     dCO2=f*w*Im*Yco2
     
-    return(list(c(dG, de, dw, dCO2), CFC=CFC, CFC14=CFC14, DNA=DNA))
+    return(list(c(dG, de, dw, dCO2), CFC14=CFC14))
   })
 }
 
@@ -144,21 +128,25 @@ DEBmodel<-function(time, state, pars){
 good_all<-function(xmonod, xmend, xpirt, xdeb){
   #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Monod~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
   pmonod<-xmonod
-  names(pmonod)<-c("v", "k", "m", "Y", "kd")
+  names(pmonod)<-c("v", "k", "m", "Y", "kec")
   #Initial B
-  B_i<-mar$DNAinit[1]/pmonod[["kd"]]
+  B_i<-d$Cmicinit[1]/pmonod[["kec"]]
   #Simulations
-  yhat_monod<-as.data.frame(ode(y=c(B=B_i, G=mar$Sinit[1], CO2=0),
-                              func = Monod, parms=pmonod,
-                              times = as.numeric(mar$Time)*24))
+  Yhat_monod<-data.frame(time=numeric(), variable=character(), value=numeric(), obs=numeric())
+  for(i in unique(d$Sinit)){
+    yhat_monod<-as.data.frame(ode(y=c(B=B_i, G=i, CO2=0),
+                                  func = Monod, parms=pmonod, 
+                                  times = as.numeric(d[d$Sinit==i, "Time"])*24))
     
-  #Selecting measured variables
-  yhat_monod<-yhat_monod[, c("time", "CO2", "DNA", "CFC14", "CFC", "G")]
-  #Long format
-  Yhat_monod<-melt(yhat_monod, id.vars=c("time"))
-  #Observations
-  Yhat_monod$obs<-c(as.numeric(mar$CO212cumul), as.numeric(mar$DNA), as.numeric(mar$Cmic14),
-              as.numeric(mar$Cmic12+mar$Cmic14), as.numeric(mar$S))
+    #Selecting measured variables
+    yhat_monod<-yhat_monod[, c("time", "CO2", "CFC14")]
+    #Long format
+    Yhat_monodp<-melt(yhat_monod, id.vars=c("time"))
+    #Observations
+    Yhat_monodp$obs<-c(as.numeric(d[d$Sinit==i, "CO2cumul"]), as.numeric(d[d$Sinit==i, "Cmic14"]))
+    Yhat_monod<-rbind(Yhat_monod, Yhat_monodp)
+  }
+  
   Gfit_monod<-Yhat_monod %>% group_by(variable) %>% summarise(SSres=sum(((obs-value)^2), na.rm = T),
                                                   SStot=sum(((obs-mean(obs, na.rm = T))^2), na.rm = T),
                                                   ll=-sum(((obs-value)^2), na.rm = T)/2/(sd(obs, na.rm = T)^2))
@@ -168,28 +156,41 @@ good_all<-function(xmonod, xmend, xpirt, xdeb){
   Gfit_monod$Model<-"Monod"
   
   #Fine temporal scale fo r graphs
-  yhat_monod_fine<-as.data.frame(ode(y=c(B=B_i, G=mar$Sinit[1], CO2=0),
+  yhat_monod_finea<-as.data.frame(ode(y=c(B=B_i, G=unique(d$Sinit)[1], CO2=0),
                                    func = Monod, parms=pmonod,
-                                   times = seq(0, 8.5, by=0.1)*24))
-  Yhat_monod_fine<-melt(yhat_monod_fine, id.vars=c("time"))
-  Yhat_monod_fine$Model<-"Monod"
+                                   times = seq(0, 100, by=0.1)*24))
+  Yhat_monod_finea<-melt(yhat_monod_finea, id.vars=c("time"))
+  Yhat_monod_finea$Model<-"Monod"
+  Yhat_monod_finea$Treatment<-"HighG"
+  yhat_monod_fineb<-as.data.frame(ode(y=c(B=B_i, G=unique(d$Sinit)[2], CO2=0),
+                                      func = Monod, parms=pmonod,
+                                      times = seq(0, 100, by=0.1)*24))
+  Yhat_monod_fineb<-melt(yhat_monod_fineb, id.vars=c("time"))
+  Yhat_monod_fineb$Model<-"Monod"
+  Yhat_monod_fineb$Treatment<-"LowG"
+  
+  Yhat_monod_fine<-rbind(Yhat_monod_finea, Yhat_monod_fineb)
   #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Mend~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
   pmend<-xmend
-  names(pmend)<-c("v", "k", "h", "Y", "kd")
+  names(pmend)<-c("v", "k", "h", "Y", "kec")
   #Initial B
-  B_i<-mar$DNAinit[1]/pmend[["kd"]]
+  B_i<-d$Cmicinit[1]/pmend[["kec"]]
   #Simulations
-  yhat_mend<-as.data.frame(ode(y=c(B=B_i, G=mar$Sinit[1], CO2=0),
-                                func = Mend, parms=pmend,
-                                times = as.numeric(mar$Time)*24))
+  Yhat_mend<-data.frame(time=numeric(), variable=character(), value=numeric(), obs=numeric())
+  for(i in unique(d$Sinit)){
+    yhat_mend<-as.data.frame(ode(y=c(B=B_i, G=i, CO2=0),
+                                 func = Mend, parms=pmend,
+                                 times = as.numeric(d[d$Sinit==i, "Time"])*24))
+    
+    #Selecting measured variables
+    yhat_mend<-yhat_mend[, c("time", "CO2", "CFC14")]
+    #Long format
+    Yhat_mendp<-melt(yhat_mend, id.vars=c("time"))
+    #Observations
+    Yhat_mendp$obs<-c(as.numeric(d[d$Sinit==i, "CO2cumul"]), as.numeric(d[d$Sinit==i, "Cmic14"]))
+    Yhat_mend<-rbind(Yhat_mend, Yhat_mendp)
+  }
   
-  #Selecting measured variables
-  yhat_mend<-yhat_mend[, c("time", "CO2", "DNA", "CFC14", "CFC", "G")]
-  #Long format
-  Yhat_mend<-melt(yhat_mend, id.vars=c("time"))
-  #Observations
-  Yhat_mend$obs<-c(as.numeric(mar$CO212cumul), as.numeric(mar$DNA), as.numeric(mar$Cmic14),
-                    as.numeric(mar$Cmic12+mar$Cmic14), as.numeric(mar$S))
   Gfit_mend<-Yhat_mend %>% group_by(variable) %>% summarise(SSres=sum(((obs-value)^2), na.rm = T),
                                                               SStot=sum(((obs-mean(obs, na.rm = T))^2), na.rm = T),
                                                               ll=-sum(((obs-value)^2), na.rm = T)/2/(sd(obs, na.rm = T)^2))
@@ -199,28 +200,41 @@ good_all<-function(xmonod, xmend, xpirt, xdeb){
   Gfit_mend$Model<-"Mend"
   
   #Fine temporal scale fo r graphs
-  yhat_mend_fine<-as.data.frame(ode(y=c(B=B_i, G=mar$Sinit[1], CO2=0),
+  yhat_mend_finea<-as.data.frame(ode(y=c(B=B_i, G=unique(d$Sinit[1]), CO2=0),
                                      func = Mend, parms=pmend,
-                                     times = seq(0, 8.5, by=0.1)*24))
-  Yhat_mend_fine<-melt(yhat_mend_fine, id.vars=c("time"))
-  Yhat_mend_fine$Model<-"Mend"
+                                     times = seq(0, 100, by=0.1)*24))
+  Yhat_mend_finea<-melt(yhat_mend_finea, id.vars=c("time"))
+  Yhat_mend_finea$Model<-"Mend"
+  Yhat_mend_finea$Treatment<-"HighG"
+  yhat_mend_fineb<-as.data.frame(ode(y=c(B=B_i, G=unique(d$Sinit[2]), CO2=0),
+                                     func = Mend, parms=pmend,
+                                     times = seq(0, 100, by=0.1)*24))
+  Yhat_mend_fineb<-melt(yhat_mend_fineb, id.vars=c("time"))
+  Yhat_mend_fineb$Model<-"Mend"
+  Yhat_mend_fineb$Treatment<-"LowG"
+  
+  Yhat_mend_fine<-rbind(Yhat_mend_finea, Yhat_mend_fineb)
   #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Pirt~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
   ppirt<-xpirt
-  names(ppirt)<-c("v", "k", "m", "h", "Y", "kd")
+  names(ppirt)<-c("v", "k", "m", "h", "Y", "kec")
   #Initial B
-  B_i<-mar$DNAinit[1]/ppirt[["kd"]]
+  B_i<-d$Cmicinit[1]/ppirt[["kec"]]
   #Simulations
-  yhat_pirt<-as.data.frame(ode(y=c(B=B_i, G=mar$Sinit[1], CO2=0),
-                               func = Pirt, parms=ppirt,
-                               times = as.numeric(mar$Time)*24))
+  Yhat_pirt<-data.frame(time=numeric(), variable=character(), value=numeric(), obs=numeric())
+  for(i in unique(d$Sinit)){
+    yhat_pirt<-as.data.frame(ode(y=c(B=B_i, G=i, CO2=0),
+                                func = Pirt, parms=ppirt,
+                                times = as.numeric(d[d$Sinit==i, "Time"])*24))
+    
+    #Selecting measured variables
+    yhat_pirt<-yhat_pirt[, c("time", "CO2", "CFC14")]
+    #Long format
+    Yhat_pirtp<-melt(yhat_pirt, id.vars=c("time"))
+    #Observations
+    Yhat_pirtp$obs<-c(as.numeric(d[d$Sinit==i, "CO2cumul"]), as.numeric(d[d$Sinit==i, "Cmic14"]))
+    Yhat_pirt<-rbind(Yhat_pirt, Yhat_pirtp)
+  }
   
-  #Selecting measured variables
-  yhat_pirt<-yhat_pirt[, c("time", "CO2", "DNA", "CFC14", "CFC", "G")]
-  #Long format
-  Yhat_pirt<-melt(yhat_pirt, id.vars=c("time"))
-  #Observations
-  Yhat_pirt$obs<-c(as.numeric(mar$CO212cumul), as.numeric(mar$DNA), as.numeric(mar$Cmic14),
-                   as.numeric(mar$Cmic12+mar$Cmic14), as.numeric(mar$S))
   Gfit_pirt<-Yhat_pirt %>% group_by(variable) %>% summarise(SSres=sum(((obs-value)^2), na.rm = T),
                                                             SStot=sum(((obs-mean(obs, na.rm = T))^2), na.rm = T),
                                                             ll=-sum(((obs-value)^2), na.rm = T)/2/(sd(obs, na.rm = T)^2))
@@ -230,28 +244,43 @@ good_all<-function(xmonod, xmend, xpirt, xdeb){
   Gfit_pirt$Model<-"Pirt"
   
   #Fine temporal scale fo r graphs
-  yhat_pirt_fine<-as.data.frame(ode(y=c(B=B_i, G=mar$Sinit[1], CO2=0),
+  yhat_pirt_finea<-as.data.frame(ode(y=c(B=B_i, G=unique(d$Sinit)[1], CO2=0),
                                     func = Pirt, parms=ppirt,
-                                    times = seq(0, 8.5, by=0.1)*24))
-  Yhat_pirt_fine<-melt(yhat_pirt_fine, id.vars=c("time"))
-  Yhat_pirt_fine$Model<-"Pirt"
+                                    times = seq(0, 100, by=0.1)*24))
+  Yhat_pirt_finea<-melt(yhat_pirt_finea, id.vars=c("time"))
+  Yhat_pirt_finea$Model<-"Pirt"
+  Yhat_pirt_finea$Treatment<-"HighG"
+  
+  yhat_pirt_fineb<-as.data.frame(ode(y=c(B=B_i, G=unique(d$Sinit)[2], CO2=0),
+                                     func = Pirt, parms=ppirt,
+                                     times = seq(0, 100, by=0.1)*24))
+  Yhat_pirt_fineb<-melt(yhat_pirt_fineb, id.vars=c("time"))
+  Yhat_pirt_fineb$Model<-"Pirt"
+  Yhat_pirt_fineb$Treatment<-"LowG"
+  
+  Yhat_pirt_fine<-rbind(Yhat_pirt_finea, Yhat_pirt_fineb)
   #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~DEB~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
   pdeb<-xdeb
-  names(pdeb)<-c("Im", "v", "m", "g", "ce", "Cwdna", "Cecfc")
+  names(pdeb)<-c("Im", "v", "m", "g", "ce", "Cwcfc", "Cecfc")
   #Initial w 
-  w_i<-mar$DNAinit[1]/pdeb[["Cwdna"]]
+  w_i = d$Cmicinit[1]/pdeb[["Cwcfc"]]
   #Br_i<-(mar$Cmicinit[1]-p[["fs"]]*Bs_i)/p[["fr"]]
   #Simulations
-  yhat_deb<-as.data.frame(ode(y=c(G=mar$Sinit[1], e=0, w=w_i, CO2=0),
-                              func = DEBmodel, parms=pdeb,
-                              times = as.numeric(mar$Time)*24))
-  #Selecting measured variables
-  yhat_deb<-yhat_deb[, c("time", "CO2", "DNA", "CFC14", "CFC", "G")]
-  #Long format
-  Yhat_deb<-melt(yhat_deb, id.vars=c("time"))
-  #Observations
-  Yhat_deb$obs<-c(as.numeric(mar$CO212cumul), as.numeric(mar$DNA), as.numeric(mar$Cmic14),
-              as.numeric(mar$Cmic12+mar$Cmic14), as.numeric(mar$S))
+  Yhat_deb<-data.frame(time=numeric(), variable=character(), value=numeric(), obs=numeric())
+  
+  for(i in unique(d$Sinit)){
+    yhat_deb<-as.data.frame(ode(y=c(G=i, e=0, w=w_i, CO2=0),
+                                func = DEBmodel, parms=pdeb,
+                                times = as.numeric(d[d$Sinit==i, "Time"])*24))
+    #Selecting measured variables
+    yhat_deb<-yhat_deb[, c("time", "CO2", "CFC14")]
+    #Long format
+    Yhat_debp<-melt(yhat_deb, id.vars=c("time"))
+    #Observations
+    Yhat_debp$obs<-c(as.numeric(d[d$Sinit==i, "CO2cumul"]), as.numeric(d[d$Sinit==i, "Cmic14"]))
+    Yhat_deb<-rbind(Yhat_deb, Yhat_debp)
+  }
+  
   Gfit_deb<-Yhat_deb %>% group_by(variable) %>% summarise(SSres=sum(((obs-value)^2), na.rm = T),
                                                   SStot=sum(((obs-mean(obs, na.rm = T))^2), na.rm = T),
                                                   ll=-sum(((obs-value)^2), na.rm = T)/2/(sd(obs, na.rm = T)^2))
@@ -261,11 +290,21 @@ good_all<-function(xmonod, xmend, xpirt, xdeb){
   Gfit_deb$Model<-"DEB"
   
   #Fine temporal scale fo r graphs
-  yhat_deb_fine<-as.data.frame(ode(y=c(G=mar$Sinit[1], e=0, w=w_i, CO2=0),
-                                   func = DEBmodel, parms=pdeb,
-                                   times = seq(0, 8.5, by=0.1)*24))
-  Yhat_deb_fine<-melt(yhat_deb_fine, id.vars=c("time"))
-  Yhat_deb_fine$Model<-"DEB"
+  yhat_deb_finea<-as.data.frame(ode(y=c(G=unique(d$Sinit)[1], e=0, w=w_i, CO2=0),
+                                   func = DEBmodel, parms=pdeb, method = "daspk",
+                                   times = seq(0, 100, by=0.1)*24))
+  Yhat_deb_finea<-melt(yhat_deb_finea, id.vars=c("time"))
+  Yhat_deb_finea$Model<-"DEB"
+  Yhat_deb_finea$Treatment<-"HighG"
+  
+  yhat_deb_fineb<-as.data.frame(ode(y=c(G=unique(d$Sinit)[2], e=0, w=w_i, CO2=0),
+                                    func = DEBmodel, parms=pdeb, method = "daspk",
+                                    times = seq(0, 100, by=0.1)*24))
+  Yhat_deb_fineb<-melt(yhat_deb_fineb, id.vars=c("time"))
+  Yhat_deb_fineb$Model<-"DEB"
+  Yhat_deb_fineb$Treatment<-"LowG"
+  
+  Yhat_deb_fine<-rbind(Yhat_deb_finea, Yhat_deb_fineb)
   
   #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Statistics~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
   #For each variable
@@ -282,7 +321,7 @@ good_all<-function(xmonod, xmend, xpirt, xdeb){
   stat3ll<-(Gfit_pirt$SSres - Gfit_deb$SSres)*(nt - length(pdeb))/Gfit_deb$SSres/(length(pdeb) - length(ppirt))
   stat3p<-pf(q=stat3ll, df1=(length(pdeb) - length(ppirt)), df2=(nt - length(pdeb)), lower.tail=F)
   
-  stat_eachF<-data.frame(Variable=c("CO2", "DNA", "CFC14", "CFC", "G"),
+  stat_eachF<-data.frame(Variable=c("CO2", "CFC14"),
                          MvsDEB_F=stat1ll, MvsDEB_p=stat1p,
                          MdvsDEB_F=stat2ll, MdvsDEB_p=stat2p,
                          PvsDEB_F=stat3ll, PvsDEB_p=stat3p)
@@ -302,7 +341,7 @@ good_all<-function(xmonod, xmend, xpirt, xdeb){
   stat3p<-round(pchisq(-2*(Gfit_pirt$ll-Gfit_deb$ll), df=(length(pdeb)-length(ppirt)),
                        lower.tail = F), 3)
   
-  stat_eachLR<-data.frame(Variable=c("CO2", "DNA", "CFC14", "CFC", "G"),
+  stat_eachLR<-data.frame(Variable=c("CO2", "CFC14"),
                           MvsDEB_ll=stat1ll, MvsDEB_p=stat1p,
                           MdvsDEB_ll=stat2ll, MdvsDEB_p=stat2p,
                           PvsDEB_ll=stat3ll, PvsDEB_p=stat3p)
@@ -380,30 +419,33 @@ good_all<-function(xmonod, xmend, xpirt, xdeb){
   
 #Read parameters estimated in python
 ##Monod
-monod_par<-as.numeric(read.csv("parameters/marstorp_monodpars.csv", header = F))
+monod_par<-as.numeric(read.csv("parameters/wu93_monodpars.csv", header = F))
 ##Mend
-mend_par<-as.numeric(read.csv("parameters/marstorp_mendpars.csv", header = F))
+mend_par<-as.numeric(read.csv("parameters/wu93_mendpars.csv", header = F))
 ##Pirt
-pirt_par<-as.numeric(read.csv("parameters/marstorp_pirtpars.csv", header = F))
+pirt_par<-as.numeric(read.csv("parameters/wu93_pirtpars.csv", header = F))
 ##DEB
-deb_par<-as.numeric(read.csv("parameters/marstorp_debpars.csv", header = F))
+deb_par<-as.numeric(read.csv("parameters/wu93_debpars.csv", header = F))
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Models evaluation~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
-Marstorp_fit<-good_all(monod_par, mend_par, pirt_par, deb_par)
-Marstorp_fit$Gfit
-Marstorp_fit$stat_eachF
-Marstorp_fit$stat_eachLR
-Marstorp_fit$stat_allF
-Marstorp_fit$stat_allLR
+Wu93_fit<-good_all(monod_par, mend_par, pirt_par, deb_par)
+Wu93_fit$Gfit
+Wu93_fit$stat_eachF
+Wu93_fit$stat_eachLR
+Wu93_fit$stat_allF
+Wu93_fit$stat_allLR
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Figure~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
-Rawdata<-subset(Marstorp_fit$Yhat, variable=="CO2" |  variable=="CO2" |  variable=="CFC14" |
-                  variable=="CFC"  | variable=="G")
-Fits<-subset(Marstorp_fit$Yhat_fine, variable=="CO2" |  variable=="CO2" |  variable=="CFC14" |
-               variable=="CFC"  | variable=="G")
+Rawdata<-subset(Wu93_fit$Yhat, variable=="CO2" | variable=="CFC14")
+Rawdata$Treatment<-c(rep("HighG", 28), rep("LowG", 28))
+
+Fits<-subset(Wu93_fit$Yhat_fine, variable=="CO2" |  variable=="CFC14")
 ggplot(subset(Rawdata), aes(time, obs))+
-  geom_point(cex=6, pch=21, fill="grey")+
-  geom_line(data=subset(Fits), aes(time, value, color=Model), lwd=1.2)+theme_min+
+  geom_point(cex=6, pch=21, aes(fill=Treatment))+
+  scale_fill_manual(values = c("grey60", "white"))+
+  geom_line(data=subset(Fits), aes(time, value, color=Model, lty=Treatment), lwd=1.2)+theme_min+
   facet_wrap(~variable, scales="free", labeller = label_parsed) + 
   ylab(expression(paste("Carbon pool (", mu, "mol ", g(DW)^{-1}, ")"))) +
   xlab("Time (days)")
+  
+
 
